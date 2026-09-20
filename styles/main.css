@@ -496,9 +496,21 @@ input[type=range]::-moz-range-thumb{width:15px;height:15px;border:0;border-radiu
   .stat{padding:.3rem .35rem}
   .stat__u{display:none}
 }
+/* Schmale Geräte: Kennzahlen in eine zweite HUD-Zeile */
+@media(max-width:660px){
+  .hud{height:auto;flex-wrap:wrap;padding:.35rem .6rem .1rem;row-gap:.1rem}
+  .hud__left{order:1}
+  .hud__right{order:2;margin-left:auto}
+  .hud__stats{order:3;flex:0 0 100%;width:100%;padding-bottom:.25rem;mask-image:none}
+  .stat{padding:.25rem .45rem}
+  .stat__u{display:inline}
+  .stage{inset:92px 0 64px 0}
+  .rooms{max-height:none}
+}
 @media(max-width:520px){
   .hud__clock span{display:none}
   .hud__orbit{display:none}
+  .hud__place strong{font-size:.85rem}
 }
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
