@@ -45,7 +45,7 @@ export function freshState(name = 'Kommandant') {
     tempTarget: CONST.BASE_TEMP,
 
     modules: { lounge: { built: true }, grow_a: { built: true, slots: 4 }, lab: { built: true }, systems: { built: true }, cargo: { built: true } },
-    lamps: { grow_a: { ppfd: 250, hours: 16, on: true } },
+    lamps: { grow_a: { ppfd: 220, hours: 16, on: true } },
     slots: [],
 
     seeds: { kresse: 2 },
@@ -184,7 +184,7 @@ export function growModules(st) {
 }
 /** Lampeneinstellung eines Moduls (Kuppel nutzt Sonne). */
 export function lampOf(st, moduleId) {
-  if (!st.lamps[moduleId]) st.lamps[moduleId] = { ppfd: 250, hours: 16, on: true };
+  if (!st.lamps[moduleId]) st.lamps[moduleId] = { ppfd: 220, hours: 16, on: true };
   return st.lamps[moduleId];
 }
 

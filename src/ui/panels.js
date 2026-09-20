@@ -261,6 +261,7 @@ function slotCard(app, s, UI) {
     if (s.prog >= 1) flags.push(['ready', 'check', 'Erntereif']);
     if (s.moist < .25) flags.push(['thirst', 'droplet', 'Braucht Wasser']);
     if (a && a.light < .35 && p.dli > .5) flags.push(['dark', 'moon', 'Zu wenig Licht']);
+    if (a && a.over) flags.push(['sick', 'sun', 'Lichtüberschuss — das Photosystem bleicht aus']);
     if (s.sick) flags.push(['sick', 'bug', s.sick]);
     const w = p.pollinate ? pollenWindow(p) : null;
     if (w && !s.pollen && s.prog >= w[0]) flags.push(['pollen', 'bee', 'Bestäubung fällig']);
@@ -358,6 +359,7 @@ function slotDetail(app, s, UI) {
     html += f('pH-Wert', a.ph, 0, `<b>pH</b>Medium: ${S.CONST.BASE_PH}<br>Ziel dieser Art: ${p.ph[0]}–${p.ph[1]}<br>Außerhalb fallen Nährstoffe als unlösliche Verbindungen aus.`);
     html += `<div class="kv" data-tip="<b>CO₂-Zuschlag</b>Bei ${num(st.co2Target)} ppm und gutem Licht."><span>CO₂-Zuschlag</span><b style="color:var(--cyan)">+${((a.co2 - 1) * 100).toFixed(0)} %</b></div>`;
     html += `<div class="kv"><span>Gesundheit</span><b style="color:${s.health > .7 ? 'var(--leaf)' : 'var(--amber)'}">${(s.health * 100).toFixed(0)} %</b></div>`;
+    if (a.over) html += `<div class="hint hint--amber" style="margin-top:.7rem">${icon('sun')}<div><b>Zu viel Licht.</b> Diese Art bekommt ${a.dli.toFixed(1)} statt ${p.dli} mol/m²/Tag. Über dem Dreifachen des Sollwerts kommt mehr Energie an, als die Pflanze abführen kann — das Photosystem II bleicht aus und die Blätter werden fahl. Lichtstärke oder Lichtzeit senken.</div></div>`;
     if (s.sick) html += `<div class="hint hint--amber" style="margin-top:.7rem">${icon('bug')}<div>Befall: <b>${esc(s.sick)}</b>. Wachstum halbiert. Mit einer Nützlingskarte behandeln (vorrätig: ${st.flags.beneficials || 0}).</div></div>`;
     if (needPollen) html += `<div class="hint hint--amber" style="margin-top:.7rem">${icon('bee')}<div><b>Bestäubung fällig.</b> Ohne Bestäubung setzt keine Frucht an und die Entwicklung bleibt stehen. Im Orbit gibt es weder Insekten noch Wind — das musst du machen.</div></div>`;
     html += `<div class="sec-t">Zu erwarten</div>

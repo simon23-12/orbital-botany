@@ -21,6 +21,10 @@ const { CONST } = S;
  * umgerechnet mit 4,57 µmol/J ergibt ~2800 µmol/m²/s — mehr als volle Erdsonne. */
 export const SUN_PPFD = 1361 * 0.45 * 4.57;
 
+/* Ab welchem Vielfachen des Sollwerts Licht schadet: Das Photosystem II
+ * bleicht aus, wenn mehr Energie ankommt, als abgeführt werden kann. */
+export const OVERLIGHT = 3.0;
+
 /* ───────────────────────── Faktoren ───────────────────────── */
 
 /** Lichtqualität: Sättigungskurve, 1,0 genau beim Sollwert. */
@@ -96,7 +100,8 @@ export function analyse(st, slot, sunFrac = null) {
   else if (ph === min) limiting = 'pH-Wert';
   const bonus = co2 * S.growthBonus(st) * (p.archetype === 'woody' && S.hasRes(st, 'grafting') ? 1.25 : 1)
     * (slot.sick ? 0.45 : 1);
-  return { dli, light, water, nut, temp, ph, co2, min, limiting, rate: min * bonus, need: p.dli, p };
+  const over = p.dli > 0.5 && dli > p.dli * OVERLIGHT;
+  return { dli, light, water, nut, temp, ph, co2, min, limiting, over, rate: min * bonus, need: p.dli, p };
 }
 
 /* ───────────────────────── Energiebilanz ───────────────────────── */
@@ -211,12 +216,13 @@ function step(st, t, dt, log) {
     }
     s.prog = clamp01(next);
 
-    /* Gesundheit */
+    /* Gesundheit — reife Kulturen halten sich deutlich länger */
     let dh = 0;
-    if (fWater === 0) dh -= dt / (20 * HOUR);
-    else if (fLight === 0 && p.dli > 0.5) dh -= dt / (26 * HOUR);
-    else if (fTemp === 0) dh -= dt / (14 * HOUR);
-    else if (dli > p.dli * 1.8 && p.dli > 0.5) dh -= dt / (30 * HOUR);   // Photoinhibition
+    const ripe = s.prog >= 1 ? 0.35 : 1;
+    if (fWater === 0) dh -= ripe * dt / (20 * HOUR);
+    else if (fLight === 0 && p.dli > 0.5) dh -= ripe * dt / (26 * HOUR);
+    else if (fTemp === 0) dh -= ripe * dt / (14 * HOUR);
+    else if (dli > p.dli * OVERLIGHT && p.dli > 0.5 && s.prog < 1) dh -= dt / (70 * HOUR);
     else if (s.sick) dh -= dt / (60 * HOUR);
     else dh += dt / (20 * HOUR);
     s.health = clamp01(s.health + dh);
@@ -281,7 +287,7 @@ function processTimed(st, t, log) {
       const def = MOD_BY_ID[id];
       m.slots = def?.slots || 0;
       S.makeSlots(st, id, m.slots);
-      if (def && !def.sunlit && !def.dark) st.lamps[id] = { ppfd: 250, hours: 16, on: true };
+      if (def && !def.sunlit && !def.dark) st.lamps[id] = { ppfd: 220, hours: 16, on: true };
       if (def?.sunlit) st.lamps[id] = { shade: 0.88, on: true };
       log.push({ type: 'module', id, name: def?.name || id });
     }
