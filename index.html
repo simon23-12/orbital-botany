@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ORBITAL BOTANY · Station Hedera</title>
+<meta name="description" content="Ein ruhiges Semi-Idle-Spiel: Botanik auf einer Raumstation in 600 km Höhe." />
+<meta name="theme-color" content="#05070d" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%230a1020'/%3E%3Cpath d='M50 82c0-22 10-36 28-42-2 24-12 38-28 42z' fill='%2357d78a'/%3E%3Cpath d='M50 82c0-18-8-30-24-35 2 20 10 32 24 35z' fill='%233fa86c'/%3E%3Crect x='48' y='58' width='4' height='26' rx='2' fill='%23274b38'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./styles/main.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="webgl-root" aria-hidden="true"></div>
+
+<!-- ============================ BOOT ============================ -->
+<div id="boot" class="boot">
+  <div class="boot__inner">
+    <div class="boot__logo">
+      <svg viewBox="0 0 120 120" class="boot__mark">
+        <circle class="bm-ring" cx="60" cy="60" r="50" />
+        <circle class="bm-ring bm-ring--2" cx="60" cy="60" r="38" />
+        <path class="bm-leaf" d="M60 96c0-26 12-43 33-50-2 29-14 45-33 50z" />
+        <path class="bm-leaf bm-leaf--2" d="M60 96c0-21-10-36-29-42 3 24 12 38 29 42z" />
+        <rect class="bm-stem" x="57.5" y="66" width="5" height="32" rx="2.5" />
+      </svg>
+    </div>
+    <h1 class="boot__title">Orbital Botany</h1>
+    <p class="boot__sub">Station <span>Hedera</span> · 600 km · LEO</p>
+    <div class="boot__bar"><i id="boot-bar"></i></div>
+    <p class="boot__status" id="boot-status">Systeme werden initialisiert …</p>
+    <button class="boot__start" id="boot-start" hidden>
+      <span>Einschleusen</span>
+      <small>Klicken startet Ton &amp; Simulation</small>
+    </button>
+    <p class="boot__hint" id="boot-hint" hidden>Kopfhörer empfohlen · Läuft in Echtzeit weiter, auch wenn du offline bist</p>
+  </div>
+  <div class="boot__err" id="boot-err" hidden></div>
+</div>
+
+<!-- ============================ HUD ============================ -->
+<header class="hud" id="hud" hidden>
+  <div class="hud__left">
+    <button class="hud__home" id="btn-home" title="Außenansicht (Esc)">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4.2" transform="rotate(-24 12 12)"/></svg>
+    </button>
+    <div class="hud__place">
+      <strong id="hud-room">Außenansicht</strong>
+      <span id="hud-sub">Station Hedera</span>
+    </div>
+  </div>
+
+  <div class="hud__stats" id="hud-stats"></div>
+
+  <div class="hud__right">
+    <div class="hud__clock">
+      <strong id="hud-time">--:--:--</strong>
+      <span id="hud-date">--</span>
+    </div>
+    <div class="hud__orbit" id="hud-orbit" title="Orbitphase">
+      <svg viewBox="0 0 40 40"><circle class="o-track" cx="20" cy="20" r="15"/><circle class="o-sun" cx="20" cy="5" r="3"/></svg>
+      <em id="hud-orbit-label">Tag</em>
+    </div>
+    <button class="hud__icon" id="btn-mail" title="Kommunikation">
+      <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M3 7l9 6 9-6"/></svg>
+      <i class="badge" id="mail-badge" hidden>0</i>
+    </button>
+    <button class="hud__icon" id="btn-menu" title="Menü">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- ============================ NAV ============================ -->
+<nav class="rooms" id="rooms" hidden></nav>
+
+<!-- ============================ PANELS ============================ -->
+<main class="stage" id="stage" hidden></main>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal__scrim" data-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true">
+    <button class="modal__x" data-close aria-label="Schließen">×</button>
+    <div class="modal__body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<script type="module" src="./src/main.js"></script>
+<noscript><p style="color:#eee;font:16px sans-serif;padding:2rem">Dieses Spiel benötigt JavaScript.</p></noscript>
+</body>
+</html>
