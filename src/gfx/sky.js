@@ -321,13 +321,15 @@ ${TILED}
 void main(){
   const float P = 16.0;                       // Gitterperiode der Kachel
   vec2 p = vUv * P;
+  /* Bewusst weiches, verzerrtes Rauschen. Gratmuster (ridged noise) sahen aus
+     dieser Nähe wie geprägtes Blech, nicht wie Landschaft. */
   vec2 warp = vec2(tfbm(p * 0.9, P * 0.9, 3), tfbm(p * 0.9 + 5.3, P * 0.9, 3)) - 0.5;
-  float ridges = tridge(p + warp * 2.2, P, 5);
+  float coarse = tfbm(p + warp * 1.6, P, 5);
   float fine   = tfbm(p * 3.1, P * 3.0, 4);
   vec2 cwarp = vec2(tfbm(p * 0.6, P * 0.6, 3), tfbm(p * 0.6 + 2.7, P * 0.6, 3)) - 0.5;
   float cloud = tfbm(p * 1.4 + cwarp * 3.0, P, 4);
   float towns = tfbm(p * 5.0, P * 5.0, 3);
-  gl_FragColor = vec4(ridges, fine, cloud, towns);
+  gl_FragColor = vec4(coarse, fine, cloud, towns);
 }`;
 
 /* Kubische Vergrößerung (Catmull-Rom, 9 bilineare Abgriffe).
@@ -401,10 +403,13 @@ void main(){
   float wet = 1.0 - smoothstep(0.34, 0.60, rough);
   float land = 1.0 - wet;
 
-  /* Großrelief aus der Karte: Gebirge werfen im Streiflicht Schatten */
+  /* Großrelief aus der Karte: Gebirge werfen im Streiflicht Schatten.
+     Nur an Land — auf dem Wasser würden schon Kompressionsartefakte der Karte
+     den Sonnenglanz in ein Knittermuster zerlegen. */
+  float relief = smoothstep(0.42, 0.62, rough);
   float hx = texture2D(tBRC, vUv + vec2(TEXEL.x, 0.0)).r - texture2D(tBRC, vUv - vec2(TEXEL.x, 0.0)).r;
   float hy = texture2D(tBRC, vUv + vec2(0.0, TEXEL.y)).r - texture2D(tBRC, vUv - vec2(0.0, TEXEL.y)).r;
-  vec3 Nb = normalize(N + (T * hx + B * hy) * uBump);
+  vec3 Nb = normalize(N + (T * hx + B * hy) * uBump * relief);
 
 #ifdef CUBIC_DAY
   vec3 albedo = texCubic(tDay, vUv, uDaySize);
@@ -412,52 +417,57 @@ void main(){
   vec3 albedo = texture2D(tDay, vUv).rgb;
 #endif
 
-  /* Feinstruktur aus der vorberechneten Detailkarte. Aus 600 km blickt man auf
-     wenige hundert Kilometer Boden; selbst 8192 Texel sind dann noch rund
-     sechsfach vergrößert. Drei Abgriffe in verschiedenen Maßstäben ergänzen
-     Gratmuster, Körnung, Wolkenfasern und Ortschaften. */
+  /* Feinstruktur aus der vorberechneten Detailkarte — bewusst zurückhaltend.
+     Sie darf nur die Farbe auflockern, niemals die Normale: Eine Störung der
+     Normalen bricht den Sonnenglanz auf und lässt den Ozean wie Knitterfolie
+     und die Wolken wie Gestein aussehen. Und sie bleibt strikt an Land; Wasser
+     ist aus dieser Höhe eine glatte Fläche. */
   vec2 duv = vUv * DREP;
   vec4 s1 = texture2D(tDetail, duv * 0.55);
   vec4 s2 = texture2D(tDetail, duv * 2.30);
   vec4 s3 = texture2D(tDetail, duv * 11.0);
-  float ridges = (s1.r * 0.62 + s2.r * 0.38 - 0.5) * 2.0;
+  float coarse = (s1.r * 0.55 + s2.r * 0.45 - 0.5) * 2.0;
   float fine   = (s3.g - 0.5) * 2.0;
   float cloudD = (s1.b * 0.55 + s2.b * 0.45 - 0.5) * 2.0;
 
-  float relief = (ridges * 0.46 + fine * 0.30) * land * uDetail;
-  albedo *= 1.0 + relief * 0.44;
-  /* Täler kühler und gesättigter, Grate heller — das gibt dem Muster Tiefe */
-  albedo = mix(albedo, albedo * vec3(0.93, 0.98, 1.05), clamp(-relief, 0.0, 1.0) * 0.55);
-  albedo *= 1.0 + fine * 0.05 * wet * uDetail;
+  float onLand = smoothstep(0.50, 0.66, rough);      // harte Kante, kein Ausfransen ins Wasser
+  albedo *= 1.0 + (coarse * 0.62 + fine * 0.38) * 0.17 * onLand * uDetail;
   albedo = max(albedo, vec3(0.0));
-  /* und in die Normale, sonst bliebe es ein flacher Aufdruck */
-  Nb = normalize(Nb + (T * relief * 1.7 + B * (fine - relief) * 0.9) * land * 0.5);
 
   float ndl = dot(Nb, L);
   float lambert = clamp(ndl, 0.0, 1.0);
   /* Weicher Terminator: die Atmosphäre streut Licht über die Tag-Nacht-Grenze */
   float soft = smoothstep(-0.16, 0.20, dot(N, L));
 
-  /* Wolken driften langsam gegen die Oberfläche */
+  /* Wolken driften langsam gegen die Oberfläche. Ihre Dichte wird multiplikativ
+     aufgebrochen — das erhält die Form der Karte und gibt ihr Faserung, während
+     ein additiver Aufschlag nur Flecken erzeugt hätte. */
   vec2 cuv = vec2(fract(vUv.x + uDrift), vUv.y);
-  float clouds = texture2D(tBRC, cuv).b;
-  float edge = smoothstep(0.02, 0.45, clouds) * (1.0 - smoothstep(0.80, 1.0, clouds));
-  clouds = clamp(clouds + cloudD * 0.40 * edge * uDetail, 0.0, 1.0);
+  float cRaw = texture2D(tBRC, cuv).b;
+  float clouds = clamp(cRaw * (1.0 + cloudD * 0.42 * uDetail)
+                     + cloudD * 0.09 * smoothstep(0.04, 0.50, cRaw) * uDetail, 0.0, 1.0);
 
-  /* Wolkenschatten: die Schicht liegt höher, der Schatten fällt versetzt */
+  /* Ein Abgriff in Sonnenrichtung dient doppelt: als Schatten der Wolken auf
+     dem Boden und als Selbstbeschattung innerhalb der Wolkendecke. */
   vec3 Lt = vec3(dot(L, T), dot(L, B), dot(L, N));
   vec2 off = -Lt.xy / max(abs(Lt.z), 0.30) * 0.0019;
   float shade = texture2D(tBRC, vec2(fract(cuv.x + off.x), clamp(cuv.y + off.y, 0.002, 0.998))).b;
   float shadow = 1.0 - smoothstep(0.18, 0.72, shade) * 0.52;
+  float selfShade = 1.0 - smoothstep(0.10, 0.75, shade) * 0.34;
 
-  vec3 col = albedo * lambert * shadow * 1.55;
-  col += albedo * soft * 0.06;
+  vec3 col = albedo * lambert * shadow * 1.62;
+  col += albedo * soft * 0.03;
 
-  /* Sonnenglanz auf dem Wasser — enger und heller als auf Land */
+  /* Sonnenglanz auf dem Wasser. Das Meer ist von Wellen aufgeraut, deshalb ist
+     der Glanzfleck breit und funkelt, statt ein scharfer Punkt zu sein. */
   vec3 H = normalize(L + V);
   float nh = clamp(dot(Nb, H), 0.0, 1.0);
-  col += vec3(1.0, 0.96, 0.88) * pow(nh, mix(40.0, 1100.0, wet)) * wet * soft * shadow * 2.2;
-  col += vec3(0.35, 0.55, 0.85) * pow(nh, 18.0) * wet * soft * 0.10;
+  float glint = pow(nh, 300.0) * 0.82 + pow(nh, 46.0) * 0.11;
+  glint *= mix(1.0, 0.68 + 0.64 * s3.g, uDetail);        // Wellenglitzern
+  col += vec3(1.0, 0.97, 0.90) * glint * wet * soft * shadow;
+  col += vec3(0.30, 0.50, 0.82) * pow(nh, 12.0) * wet * soft * 0.05;
+  /* Land glänzt matt */
+  col += vec3(1.0, 0.98, 0.94) * pow(nh, 30.0) * onLand * soft * shadow * 0.06;
 
   /* Nachtseite: Städte, von Wolken verdeckt. Ballungsräume sind bei dieser
      Vergrößerung nur Flecken — die Detailkarte löst sie in Ortschaften auf. */
@@ -468,11 +478,15 @@ void main(){
   col += lights * night * 0.85 * flicker * (1.0 - smoothstep(0.1, 0.7, clouds) * 0.75);
   col += albedo * night * 0.010;
 
-  /* Wolken darüberlegen. Wolkenalbedo liegt bei rund 70 % — hell, nicht blendend. */
+  /* Wolken darüberlegen. Albedo rund 70 % — hell, aber nicht blendend.
+     Das Volumen kommt aus der Dichte selbst: dünne Schleier bleiben grau und
+     durchscheinend, dichte Ballen leuchten auf, und die Selbstbeschattung legt
+     die sonnenabgewandte Seite in den Schatten. Über Normalen ginge das auch,
+     nur sähen die Wolken dann aus wie geprägtes Blech. */
   float cl = smoothstep(0.12, 0.82, clouds);
+  float thick = smoothstep(0.10, 0.90, clouds);
   vec3 cloudCol = mix(vec3(0.020, 0.028, 0.045), vec3(1.04, 1.05, 1.10), lambert);
-  /* Wolkentürme beschatten sich selbst — das gibt ihnen Volumen */
-  cloudCol *= 1.0 + (cloudD * 0.26 + 0.18 * smoothstep(0.5, 1.0, clouds)) * uDetail;
+  cloudCol *= (0.68 + 0.44 * thick) * mix(1.0, selfShade, lambert * 0.85);
   cloudCol = mix(cloudCol, vec3(1.35, 1.02, 0.74), pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.4) * 0.35 * soft);
   col = mix(col, cloudCol, cl * 0.93);
 
@@ -639,7 +653,7 @@ export class Sky {
       uCam: { value: new THREE.Vector3() },
       uTime: { value: 0 },
       uDrift: { value: 0 },
-      uBump: { value: tex.procedural ? 9.0 : 14.0 },
+      uBump: { value: tex.procedural ? 6.0 : 8.0 },
       uDetail: { value: 1 },
       uDaySize: { value: new THREE.Vector2(...(tex.daySize || [4096, 2048])) },
     };

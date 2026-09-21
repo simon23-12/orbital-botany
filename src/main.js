@@ -222,8 +222,11 @@ const app = {
     this.sky.earthGroup.position.copy(this.roomEarthDir).multiplyScalar(this.sky.earthDistance);
 
     const def = MOD_BY_ID[id];
+    // Räume ohne Fenster brauchen keinen Himmel: Die Erde würde formatfüllend
+    // gerendert und anschließend komplett von der Modulwand übermalt.
+    const seesOut = !!this.interior.ctx.window;
     this.stage.use(this.interior.scene, this.interior.camera, {
-      sky: { scene: this.sky.scene, camera: this.sky.camera },
+      sky: seesOut ? { scene: this.sky.scene, camera: this.sky.camera } : null,
       // Schwelle über der Wolkenhelligkeit: sonst blüht die ganze Tagseite
       bloomStrength: id === 'lounge' ? .5 : .42, bloomRadius: .62, bloomThreshold: 1.25, grain: .022, vignette: 1.1,
     });
@@ -328,10 +331,11 @@ const app = {
       this.exterior.update(dt, t, st);
       this.sky.syncTo(this.exterior.camera);
     } else {
-      const sunRoom = this.sunLocal.clone().applyQuaternion(this.roomQuat);
-      this.sky.setSun(sunRoom);
       this.interior.update(dt, t, st, sol);
-      this.sky.syncTo(this.interior.camera);
+      if (this.interior.ctx.window) {
+        this.sky.setSun(this.sunLocal.clone().applyQuaternion(this.roomQuat));
+        this.sky.syncTo(this.interior.camera);
+      }
     }
 
     this.stage.render(dt);

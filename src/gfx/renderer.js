@@ -33,11 +33,14 @@ const GradeShader = {
     }`,
 };
 
+/* Das Pixelverhältnis ist der mit Abstand teuerste Regler: Die Erde füllt oft
+ * das ganze Bild, und jeder Schritt nach oben kostet quadratisch Füllrate.
+ * Deshalb bleibt selbst „Ultra" unter dem vollen Retina-Wert. */
 export const QUALITY = {
-  low:    { pixelRatio: 1.0, bloom: false, shadows: false, grade: false, aniso: 2, segs: 48 },
-  medium: { pixelRatio: 1.25, bloom: true, shadows: false, grade: true, aniso: 4, segs: 96 },
-  high:   { pixelRatio: 1.6, bloom: true, shadows: true, grade: true, aniso: 8, segs: 160 },
-  ultra:  { pixelRatio: 2.0, bloom: true, shadows: true, grade: true, aniso: 16, segs: 256 },
+  low:    { pixelRatio: 1.0,  bloom: false, shadows: false, grade: false, aniso: 2,  segs: 48 },
+  medium: { pixelRatio: 1.2,  bloom: true,  shadows: false, grade: true,  aniso: 4,  segs: 96 },
+  high:   { pixelRatio: 1.4,  bloom: true,  shadows: true,  grade: true,  aniso: 8,  segs: 160 },
+  ultra:  { pixelRatio: 1.7,  bloom: true,  shadows: true,  grade: true,  aniso: 16, segs: 224 },
 };
 
 export function autoQuality() {
@@ -46,7 +49,8 @@ export function autoQuality() {
   const mem = navigator.deviceMemory || 4;
   const cores = navigator.hardwareConcurrency || 4;
   if (mem <= 3 || cores <= 3 || w < 900) return 'low';
-  if (mem >= 8 && cores >= 8 && w >= 2200) return 'ultra';
+  // „Ultra" nur bei wirklich viel Leistung — ein Retina-Display allein genügt nicht
+  if (mem >= 8 && cores >= 10 && w >= 3400) return 'ultra';
   if (mem >= 8 && cores >= 6) return 'high';
   return 'medium';
 }
@@ -96,7 +100,9 @@ export class Stage {
     if (opts.sky) { mp.clear = false; mp.clearDepth = true; }
     composer.addPass(mp);
     if (this.q.bloom && opts.bloom !== false) {
-      const b = new UnrealBloomPass(new THREE.Vector2(w, h),
+      // Bloom ist ohnehin ein Weichzeichner — halbe Auflösung spart viel und
+      // fällt im Ergebnis nicht auf
+      const b = new UnrealBloomPass(new THREE.Vector2(w * 0.5, h * 0.5),
         opts.bloomStrength ?? 0.62, opts.bloomRadius ?? 0.55, opts.bloomThreshold ?? 0.72);
       composer.addPass(b);
       this.bloom = b;
