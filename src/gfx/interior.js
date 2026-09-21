@@ -436,11 +436,14 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
 
-    const R1 = 1.62, Z1 = 0.22;        // oberer Ring, beim Betrachter
-    const R2 = 1.06, Z2 = -1.12;       // unterer Ring, Fassung der Mittelscheibe
+    /* Der weite Ring liegt bewusst HINTER dem Auge — wie wenn man den Kopf in
+       die Kuppel steckt. So füllen die sechs Fenster jedes Seitenverhältnis bis
+       hinaus zu Ultrawide, ohne dass man seitlich am Rahmen vorbeisieht. */
+    const R1 = 1.95, Z1 = 0.78;        // weiter Ring, hinter dem Betrachter
+    const R2 = 1.06, Z2 = -1.12;       // enger Ring, Fassung der Mittelscheibe
     // Matt und hell: die Rahmen nehmen das Erdlicht diffus auf, statt es zu spiegeln
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xd8dee4, roughness: .58, metalness: .30 });
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x8e979f, roughness: .55, metalness: .5, side: THREE.DoubleSide });
+    const innerMat = new THREE.MeshStandardMaterial({ color: 0x353b44, roughness: .72, metalness: .35, side: THREE.DoubleSide });
     const paneMat = new THREE.MeshBasicMaterial({
       color: 0x8fb8e0, transparent: true, opacity: .028, side: THREE.DoubleSide,
       depthWrite: false, blending: THREE.AdditiveBlending,
@@ -491,38 +494,50 @@ const ROOMS = {
     centre.renderOrder = 3;
     g.add(centre);
 
-    /* Kragen hinter dem Betrachter: Übergang zum Modul */
+    /* Kragen hinter dem Betrachter: Übergang zum Modul.
+       Er beginnt bewusst erst hinter der Kamera — sonst schiebt er sich auf
+       breiten Bildschirmen von den Seiten ins Bild und verdeckt die Aussicht. */
+    const COLLAR_START = 0.84;
     const collar = new THREE.Mesh(new THREE.CylinderGeometry(R1 * 1.04, R1 * 1.04, 1.5, 6, 1, true), innerMat);
     collar.rotation.x = Math.PI / 2;
     collar.rotation.z = Math.PI / 6;
-    collar.position.z = Z1 + .74;
+    collar.position.z = COLLAR_START + .75;
     g.add(collar);
     const back = new THREE.Mesh(new THREE.CircleGeometry(R1 * 1.04, 6), innerMat);
-    back.position.z = Z1 + 1.48;
+    back.position.z = COLLAR_START + 1.5;
     back.rotation.z = Math.PI / 6;
     g.add(back);
     const hatch = new THREE.Mesh(new THREE.TorusGeometry(.56, .07, 8, 28), M.metal);
-    hatch.position.z = Z1 + 1.45;
+    hatch.position.z = COLLAR_START + 1.47;
     g.add(hatch);
 
-    /* Handläufe an den Pfosten */
+    /* Handläufe: Bügel, die längs auf den Pfosten sitzen — wie an jedem
+       ISS-Modul. Quer durchs Fenster würden sie nur die Aussicht zerschneiden. */
+    const UPV = new THREE.Vector3(0, 1, 0);
     for (let i = 0; i < 6; i += 2) {
-      const a = i * TAU / 6 + Math.PI / 6;
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, .62, 8), M.metal);
-      bar.position.set(Math.cos(a) * (R1 * .82), Math.sin(a) * (R1 * .82), Z1 + .55);
-      bar.rotation.x = Math.PI / 2;
+      const aTop = corner(i, R1, Z1), aBot = corner(i, R2, Z2);
+      const p1 = aTop.clone().lerp(aBot, .34);
+      const p2 = aTop.clone().lerp(aBot, .66);
+      const mid = p1.clone().lerp(p2, .5);
+      const inward = mid.clone().setZ(0).normalize().multiplyScalar(-.075);
+      const axis = p2.clone().sub(p1).normalize();
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.027, .027, p1.distanceTo(p2), 8), frameMat);
+      bar.position.copy(mid).add(inward);
+      bar.quaternion.setFromUnitVectors(UPV, axis);
       g.add(bar);
+      for (const p of [p1, p2]) {
+        const stud = new THREE.Mesh(new THREE.CylinderGeometry(.017, .017, .085, 6), frameMat);
+        stud.position.copy(p).add(inward.clone().multiplyScalar(.5));
+        stud.quaternion.setFromUnitVectors(UPV, inward.clone().normalize());
+        g.add(stud);
+      }
     }
 
-    /* Klappsitz und ein Arbeitsbildschirm am Rahmen */
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(.62, .09, .46),
-      new THREE.MeshStandardMaterial({ map: fabricTexture('#2f3c4e'), color: 0x9fb0c4, roughness: .95 }));
-    seat.position.set(0, -R1 * .86, Z1 + .62);
-    seat.rotation.x = .12;
-    g.add(seat);
-    const scr = screen(.42, .27, .5);
-    scr.position.set(R1 * .62, R1 * .52, Z1 + .18);
-    scr.rotation.set(0, -.5, -.6);
+    /* Arbeitsbildschirm an einem Rahmen, wie in der echten Cupola */
+    const scr = screen(.40, .26, .5);
+    const anchor = corner(1, R1, Z1).lerp(corner(1, R2, Z2), .42);
+    scr.position.copy(anchor).addScaledVector(anchor.clone().setZ(0).normalize(), -.14);
+    scr.lookAt(0, 0, 1.2);
     g.add(scr);
     ctx.screens = [scr];
 
@@ -544,7 +559,7 @@ const ROOMS = {
 
     /* Blickrichtung: 33° neben dem Nadir — dann liegt der Erdhorizont im Bild */
     ctx.window = { mesh: centre, dir: new THREE.Vector3(0, -0.55, -0.84).normalize(), wide: true };
-    ctx.camera = { pos: new THREE.Vector3(0, 0, .82), look: new THREE.Vector3(0, -.05, -4.0), fov: 84 };
+    ctx.camera = { pos: new THREE.Vector3(0, 0, .45), look: new THREE.Vector3(0, -.05, -4.0), fov: 84 };
     return g;
   },
 

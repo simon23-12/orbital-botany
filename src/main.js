@@ -24,10 +24,18 @@ import { sfx } from './audio/sfx.js';
 import { $, el, num, dur, vol, grams, clamp, TAU, DEG, MIN, HOUR } from './core/util.js';
 
 const bootBar = $('#boot-bar'), bootStatus = $('#boot-status'), bootEl = $('#boot');
+/* Zwei Bilder abwarten, damit der Fortschritt sichtbar wird — aber mit
+ * Zeitgeber als Rückfalllösung: In einem Hintergrund-Tab ruht
+ * requestAnimationFrame, und der Ladebildschirm bliebe sonst stehen. */
 const step = (pct, text) => {
   bootBar.style.width = pct + '%';
   if (text) bootStatus.textContent = text;
-  return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  return new Promise(resolve => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; resolve(); } };
+    requestAnimationFrame(() => requestAnimationFrame(fin));
+    setTimeout(fin, 150);
+  });
 };
 
 const app = {
