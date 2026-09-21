@@ -158,8 +158,8 @@ export function groundHeading(t) {
 /* Grobe Regionen entlang der befliegbaren Breiten. Land wird vor Wasser geprüft. */
 const REGIONS = [
   ['Nordamerika · Westküste', 32, 52, -130, -114], ['Rocky Mountains', 31, 52, -114, -102],
-  ['Great Plains', 29, 52, -102, -88], ['Große Seen', 41, 50, -92, -76],
-  ['Nordamerika · Ostküste', 30, 48, -83, -66], ['Grönlandsee', 52, 60, -60, -20],
+  ['Great Plains', 29, 52, -102, -88], ['Große Seen', 41, 50, -93, -76], ['Neufundland', 46, 52, -60, -52],
+  ['Nordamerika · Ostküste', 30, 46, -83, -70], ['Labrador & Québec', 46, 52, -80, -57],
   ['Mexiko', 15, 31, -117, -87], ['Karibik', 9, 26, -87, -60],
   ['Amazonasbecken', -12, 6, -75, -48], ['Anden', -30, 8, -80, -66],
   ['Brasilianisches Hochland', -25, -5, -58, -38], ['Gran Chaco', -33, -18, -66, -56],
@@ -179,7 +179,7 @@ const REGIONS = [
   ['Neuseeland', -47, -34, 166, 179], ['Sibirien', 45, 52, 60, 140],
 ];
 const OCEANS = [
-  ['Nordatlantik', 0, 52, -70, -10], ['Südatlantik', -52, 0, -50, 20],
+  ['Nordatlantik', 0, 52, -64, -11], ['Südatlantik', -52, 0, -50, 20],
   ['Nordpazifik', 0, 52, 130, 180], ['Nordpazifik', 0, 52, -180, -105],
   ['Südpazifik', -52, 0, 150, 180], ['Südpazifik', -52, 0, -180, -75],
   ['Indischer Ozean', -45, 25, 20, 118], ['Arabisches Meer', 5, 25, 55, 75],
