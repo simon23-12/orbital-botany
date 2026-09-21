@@ -54,13 +54,16 @@ const app = {
       await step(18, 'Satellitenkarten der Erde werden geladen …');
       const segs = this.stage.q.segs;
       const texSize = this.stage.qualityName === 'low' ? 1024 : this.stage.qualityName === 'ultra' ? 4096 : 2048;
+      // Die hoch aufgelöste Tagkarte nur dort, wo Speicher und Füllrate reichen
+      const q = this.stage.qualityName;
       this.sky = await Sky.create(this.stage.renderer, segs, texSize, (f, key) => {
         const label = { day: 'Tagseite', night: 'Nachtlichter', brc: 'Relief & Wolken' }[key] || key;
         step(18 + f * 34, `${label} geladen …`);
-      });
+      }, { hires: q === 'high' || q === 'ultra', cubic: q !== 'low' });
 
-      // Das prozedurale Feindetail kostet spürbar Füllrate
-      this.sky.uniforms.uDetail.value = this.stage.qualityName === 'low' ? 0 : 1;
+      // Das Feindetail liegt als vorberechnete Karte vor und kostet nur noch
+      // drei Abgriffe — es kann auf jeder Stufe anbleiben.
+      this.sky.uniforms.uDetail.value = 1;
 
       await step(52, 'Sterne werden gesetzt …');
       this.exterior = new Exterior(this.sky);
@@ -195,7 +198,7 @@ const app = {
     this.sky.earthGroup.position.set(0, -this.sky.earthDistance, 0);
     this.stage.use(this.exterior.scene, this.exterior.camera, {
       sky: { scene: this.sky.scene, camera: this.sky.camera },
-      bloomStrength: 0.55, bloomRadius: .7, bloomThreshold: .78, grain: .028,
+      bloomStrength: 0.6, bloomRadius: .7, bloomThreshold: 1.2, grain: .028,
     });
     if (!this.exterior.controls) this.exterior.attachControls(this.stage.renderer.domElement);
     this.exterior.controls.enabled = true;
@@ -221,7 +224,8 @@ const app = {
     const def = MOD_BY_ID[id];
     this.stage.use(this.interior.scene, this.interior.camera, {
       sky: { scene: this.sky.scene, camera: this.sky.camera },
-      bloomStrength: id === 'lounge' ? .48 : .38, bloomRadius: .6, bloomThreshold: .82, grain: .022, vignette: 1.1,
+      // Schwelle über der Wolkenhelligkeit: sonst blüht die ganze Tagseite
+      bloomStrength: id === 'lounge' ? .5 : .42, bloomRadius: .62, bloomThreshold: 1.25, grain: .022, vignette: 1.1,
     });
     UI.setRoomLabel(def.name, def.short + ' · Modul');
     const panelId = id === 'lounge' ? 'lounge'

@@ -202,7 +202,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-l
 }
 .panel__head h2{margin:0;font-size:1rem;font-weight:500;letter-spacing:.05em;flex:1}
 .panel__head .sub{font-family:var(--mono);font-size:.66rem;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase}
-.panel__body{padding:1rem;overflow:auto;flex:1;scroll-behavior:smooth}
+.panel__body{padding:1rem;overflow:auto;flex:1;overscroll-behavior:contain}
 .panel__foot{padding:.75rem 1rem;border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:center;flex:none;background:rgba(0,0,0,.18)}
 
 .tabs{display:flex;gap:.2rem;padding:.4rem .5rem;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}

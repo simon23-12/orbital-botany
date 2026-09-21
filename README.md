@@ -53,7 +53,7 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 | | |
 |---|---|
 | **Grafik** | Three.js (WebGL2), eigene Shader, Bloom & Filmkorn |
-| **Erde** | Satellitenkarten der NASA (Albedo, Nachtlichter, Relief, Rauheit, Wolken) in einem eigenen Shader, ergänzt um prozedurale Feinstruktur — ohne die wäre der Blick aus 600 km verwaschen. Fehlen die Bilder, erzeugt das Spiel Ersatzkarten selbst |
+| **Erde** | Satellitenkarten (Tagseite 8K, Nachtlichter, Relief, Rauheit, Wolken) in einem eigenen Shader. Aus 600 km sind selbst 8192 Texel noch sechsfach vergrößert, deshalb kubische Vergrößerung plus eine vorberechnete Detailkarte für Gelände, Wolkenfasern und Ortschaften. Fehlen die Bilder, erzeugt das Spiel Ersatzkarten selbst |
 | **Bodenspur** | echt gerechnet: Die Erde dreht sich geografisch korrekt unter der Station durch, die Cupola sagt, worüber du gerade fliegst |
 | **Bahnmechanik** | echt gerechnet: Keplersche Umlaufzeit, Betawinkel, Schattenanteil |
 | **Musik** | generativ per Web Audio API — Drone, wandernde Akkordflächen, Glockentöne. Kein Audiomaterial, wiederholt sich praktisch nie |
@@ -96,8 +96,9 @@ src/
 vendor/three/
 ```
 
-Die Erdtexturen liegen unter `assets/planet/`, ihre Herkunft steht in
-`assets/planet/HERKUNFT.md`.
+Die Erdtexturen liegen unter `assets/planet/`; Herkunft und Lizenzen stehen in
+`assets/planet/HERKUNFT.md` — die 8K-Tagkarte stammt von Solar System Scope
+(CC BY 4.0), der Rest aus dem three.js-Beispielverzeichnis.
 
 Wer eigene Pflanzen hinzufügen will: `src/data/plants.js`. Ein Eintrag mit
 echten Werten für `days`, `dli`, `water`, `temp`, `ph` reicht — den Rest macht

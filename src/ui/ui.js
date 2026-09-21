@@ -52,6 +52,10 @@ export const UI = {
     document.addEventListener('pointerdown', () => { this._dragging = true; });
     document.addEventListener('pointerup', () => { this._dragging = false; });
     document.addEventListener('pointercancel', () => { this._dragging = false; });
+    document.addEventListener('pointermove', e => { this._pointerInPanel = !!e.target.closest?.('.panel'); }, { passive: true });
+    document.addEventListener('wheel', () => { this._lastScroll = performance.now(); }, { passive: true, capture: true });
+    document.addEventListener('scroll', () => { this._lastScroll = performance.now(); }, { passive: true, capture: true });
+    document.addEventListener('touchmove', () => { this._lastScroll = performance.now(); }, { passive: true, capture: true });
     document.addEventListener('pointermove', e => {
       if (!this.els.tip.hidden) this.moveTip(e.clientX, e.clientY);
     });
@@ -127,8 +131,16 @@ export const UI = {
   /** Bedient der Spieler gerade etwas? Dann nicht dazwischenfunken. */
   isBusy() {
     if (this._dragging) return true;
+    // kurz nach einer Scrollbewegung bleibt das Panel stehen
+    if (performance.now() - (this._lastScroll || 0) < 2500) return true;
     const a = document.activeElement;
-    return !!(a && a !== document.body && this.els.stage.contains(a));
+    if (a && a !== document.body && this.els.stage.contains(a)) return true;
+    // Zeiger über einem Panel, das tatsächlich einen Scrollbalken hat
+    if (this._pointerInPanel) {
+      const b = $('.panel__body', this.els.stage);
+      if (b && b.scrollHeight > b.clientHeight + 4) return true;
+    }
+    return false;
   },
 
   /**
@@ -148,7 +160,7 @@ export const UI = {
     if (same) node.style.animation = 'none';
     clear(this.els.stage).append(node);
     this._panelKey = key;
-    if (scrollTop) { const b = $('.panel__body', this.els.stage); if (b) b.scrollTop = scrollTop; }
+    if (same) { const b = $('.panel__body', this.els.stage); if (b) b.scrollTop = scrollTop; }
     if (this._tipNode && !document.contains(this._tipNode)) this.hideTip();
   },
   refresh(opts) {
