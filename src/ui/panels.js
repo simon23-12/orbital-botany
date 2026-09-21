@@ -9,7 +9,7 @@ import { MODULES, MOD_BY_ID } from '../data/modules.js';
 import { RESEARCH, RES_BY_ID, BRANCHES } from '../data/research.js';
 import { CATALOG, SHOP_BY_ID, SUPPLIES, COMFORT, freightFor } from '../data/shop.js';
 import { openMail, personOf, markAllRead, unread } from '../game/mail.js';
-import { solar, PERIOD, V_ORB, ALT, A as ORBIT_A, BETA_CRIT, beta, EARTH_ANGULAR, HORIZON, distanceTravelled, orbits, eclipseFraction } from '../core/orbit.js';
+import { solar, PERIOD, V_ORB, ALT, A as ORBIT_A, BETA_CRIT, beta, EARTH_ANGULAR, HORIZON, distanceTravelled, orbits, eclipseFraction, groundTrack, groundHeading, regionAt, formatCoords } from '../core/orbit.js';
 import { sfx } from '../audio/sfx.js';
 import { exportFile, importText, wipe } from '../core/save.js';
 import { music } from '../audio/music.js';
@@ -137,6 +137,71 @@ export function lounge(app, arg, UI) {
       el('button', { class: 'btn', onclick: () => UI.doWaterAll(), html: icon('droplets') + 'Alles gießen' }),
       el('span', { style: { flex: 1 } }),
       el('button', { class: 'btn btn--ghost btn--sm', onclick: () => UI.open('menu'), html: icon('settings') }),
+    ],
+  });
+}
+
+/* ───────────────────────── CUPOLA ───────────────────────── */
+
+export function cupola(app, arg, UI) {
+  const st = app.st, now = Date.now();
+  const g = groundTrack(now);
+  const region = regionAt(g.lat, g.lon);
+  const sol = solar(now);
+  const head = groundHeading(now);
+  const compass = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'][Math.round(head / 45) % 8];
+  const body = [];
+
+  body.push(el('div', { class: 'card', style: { background: 'linear-gradient(135deg,rgba(79,214,255,.10),rgba(95,217,142,.04))' } },
+    el('div', { class: 'card__t' },
+      el('h3', { text: region }),
+      el('span', { class: 'chip ' + (sol.lit ? 'chip--amber' : 'chip--violet'), text: sol.lit ? 'Tagseite' : 'Nachtseite' })),
+    el('p', { class: 'card__d mono', style: { fontSize: '.82rem', margin: '.1rem 0 .6rem' }, text: formatCoords(g.lat, g.lon) }),
+    kv('Kurs über Grund', `${head.toFixed(0)}° ${compass}`, '<b>Kurs</b>Bei 51,6° Bahnneigung läuft die Bodenspur als Welle über die Karte — nie über die Pole, dafür 16-mal am Tag herum.'),
+    kv('Bodengeschwindigkeit', `${num(V_ORB * 3600 * (6371 / (6371 + ALT)), 0)} km/h`, '<b>Über Grund</b>Etwas langsamer als die Bahngeschwindigkeit, weil der Boden näher am Erdmittelpunkt liegt.'),
+    kv(sol.lit ? 'Sonnenuntergang in' : 'Sonnenaufgang in', sol.nextChange === Infinity ? 'keiner — Dauersonne' : dur(sol.nextChange, { short: true })),
+    kv('Nächster Überflug derselben Stelle', `${(PERIOD / 60000).toFixed(0)} min später, ${num(24.5, 1)}° weiter westlich`),
+  ));
+
+  /* Erdbeobachtung */
+  const last = st.flags.lastPhoto || 0;
+  const ready = now - last >= A.PHOTO_COOLDOWN;
+  const scope = st.comfort.includes('telescope');
+  body.push(secT('Erdbeobachtung'));
+  body.push(el('div', { class: 'card' },
+    el('p', { class: 'card__d', html: scope
+      ? 'Mit dem Spektiv am Fenster lassen sich brauchbare Aufnahmen machen. Das Erdbeobachtungsprogramm vergütet sie.'
+      : 'Aufnahmen aus dem Orbit sind für die Bodenstation bares Geld wert. Mit einem <b>Spektiv</b> aus dem Katalog deutlich mehr.' }),
+    el('button', {
+      class: 'btn btn--cyan btn--block', disabled: !ready,
+      onclick: () => {
+        const r = A.photograph(st, { region, lat: g.lat, lon: g.lon, lit: sol.lit });
+        if (r.ok) { sfx.research(); UI.toast('ok', 'Aufnahme im Kasten', `${region} · +${num(r.credits)} Cr · +${num(r.xp)} EP`); app.save(); UI.render(); }
+        else { sfx.error(); UI.toast('info', 'Noch nicht', r.msg); }
+      },
+      html: icon('eye') + (ready ? 'Aufnahme machen' : `wieder in ${dur(A.PHOTO_COOLDOWN - (now - last), { short: true })}`),
+    })));
+
+  const log = st.flags.photoLog || [];
+  if (log.length) {
+    body.push(secT(`Archiv · ${st.stats.photos || log.length} Aufnahmen`));
+    const seen = new Set();
+    for (const e of log.slice(0, 12)) {
+      body.push(el('div', { class: 'kv' },
+        el('span', { html: `${esc(e.region)} ${e.night ? '<span class="chip chip--violet">Nacht</span>' : ''}` }),
+        el('b', { text: dateFull(e.at).split(',')[0] })));
+      seen.add(e.region);
+    }
+  }
+
+  body.push(hint('Die Cupola der ISS wurde 2010 von der ESA geliefert. Ihre Mittelscheibe misst 80 cm und ist das größte Fenster, das je ins All geflogen ist — vier Lagen Quarzglas, davor eine Opferscheibe gegen Mikrometeoriten. Wenn niemand hinsieht, schließen Aluminiumläden.', 'leaf'));
+
+  return panel({
+    title: 'Cupola', sub: 'Aussichtskuppel · 7 Fenster', icon: 'cupola', narrow: true, body,
+    foot: [
+      el('button', { class: 'btn btn--sm btn--ghost', onclick: () => UI.close(), html: icon('x') + 'Nur schauen' }),
+      el('span', { style: { flex: 1 } }),
+      el('span', { class: 'sub', text: `Umlauf ${num(orbits(st.t0, now), 0)}` }),
     ],
   });
 }

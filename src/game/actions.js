@@ -234,6 +234,28 @@ export function startResearch(st, id) {
   return ok(`${r.name} läuft — fertig in ${hours.toFixed(1)} Stunden`);
 }
 
+/** Erdbeobachtung aus der Cupola — belohnt das Hinsehen. */
+export const PHOTO_COOLDOWN = 3 * HOUR;
+export function photograph(st, info) {
+  const last = st.flags.lastPhoto || 0;
+  const now = Date.now();
+  if (now - last < PHOTO_COOLDOWN) return no('Die Bodenstation nimmt erst wieder eine neue Aufnahme an');
+  st.flags.lastPhoto = now;
+  const land = !/Ozean|Meer|See$/.test(info.region);
+  const scope = st.comfort.includes('telescope') ? 1.6 : 1;
+  const credits = Math.round((land ? 120 : 70) * (info.lit ? 1 : 1.35) * scope);
+  const xp = Math.round((land ? 26 : 16) * scope);
+  st.credits += credits;
+  st.stats.earned += credits;
+  st.stats.photos = (st.stats.photos || 0) + 1;
+  const log = st.flags.photoLog ||= [];
+  log.unshift({ at: now, region: info.region, lat: info.lat, lon: info.lon, night: !info.lit, credits });
+  if (log.length > 40) log.length = 40;
+  S.addXp(st, xp);
+  emit('photo', { region: info.region, credits });
+  return ok(`${info.region} aufgenommen`, { credits, xp });
+}
+
 export function useCo2Cartridge(st) {
   if (!(st.flags.co2cart > 0)) return no('Keine Patrone vorrätig');
   st.flags.co2cart--;

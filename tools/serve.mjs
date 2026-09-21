@@ -25,7 +25,7 @@ createServer(async (req, res) => {
     const buf = await readFile(file);
     res.writeHead(200, {
       'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
     }).end(buf);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('404');

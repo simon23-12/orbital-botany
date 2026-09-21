@@ -44,7 +44,7 @@ export function freshState(name = 'Kommandant') {
     co2Target: CONST.BASE_CO2,
     tempTarget: CONST.BASE_TEMP,
 
-    modules: { lounge: { built: true }, grow_a: { built: true, slots: 4 }, lab: { built: true }, systems: { built: true }, cargo: { built: true } },
+    modules: { lounge: { built: true }, cupola: { built: true }, grow_a: { built: true, slots: 4 }, lab: { built: true }, systems: { built: true }, cargo: { built: true } },
     lamps: { grow_a: { ppfd: 220, hours: 16, on: true } },
     slots: [],
 
@@ -57,7 +57,7 @@ export function freshState(name = 'Kommandant') {
 
     stats: {
       planted: 0, harvested: 0, deaths: 0, massG: 0, earned: 0, spent: 0,
-      waterUsed: 0, waterRecovered: 0, deliveries: 0, pollinated: 0, researchDone: 0,
+      waterUsed: 0, waterRecovered: 0, deliveries: 0, pollinated: 0, researchDone: 0, photos: 0,
     },
     flags: {},
     settings: { music: true, musicVol: 0.55, sfx: true, sfxVol: 0.6, quality: 'auto', bloom: true, reduceMotion: false },
@@ -215,6 +215,8 @@ export function migrate(raw) {
   const fresh = freshState(st.name || 'Kommandant');
   for (const k of Object.keys(fresh)) if (st[k] === undefined) st[k] = fresh[k];
   for (const k of Object.keys(fresh.stats)) if (st.stats[k] === undefined) st.stats[k] = 0;
+  // Die Cupola gab es in früheren Ständen noch nicht
+  if (!st.modules.cupola) st.modules.cupola = { built: true };
   st.slots = (st.slots || []).filter(s => s && s.id);
   for (const s of st.slots) if (s.plant && !PLANT_BY_ID[s.plant]) { s.plant = null; s.dead = false; }
   st.research.done = (st.research.done || []).filter(id => RES_BY_ID[id]);

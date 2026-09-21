@@ -9,7 +9,7 @@
  *  entfernt, also verschiebt er sich nicht, wenn man um die Station herumfliegt.
  */
 import * as THREE from 'three';
-import { EARTH_ANGULAR } from '../core/orbit.js';
+import { EARTH_ANGULAR, groundTrack, groundHeading } from '../core/orbit.js';
 
 /* ───────────────────── GLSL: Simplex-Rauschen (Ashima/Gustavson) ───────────────────── */
 const NOISE = /* glsl */`
@@ -166,7 +166,8 @@ void main(){
     gl_FragColor = vec4(vec3(lights), 1.0);
 
   } else {
-    /* ── Wolken: ITCZ am Äquator, Westwindzonen, Lücken in den Subtropen ── */
+    /* ── Kombinationskarte im selben Format wie die NASA-Daten:
+          R = Relief, G = Rauheit (Wasser glatt), B = Wolken ── */
     float d = alat / 1.5708;
     float itcz = exp(-pow((d - 0.04) / 0.10, 2.0)) * 1.15;
     float storm = exp(-pow((d - 0.60) / 0.19, 2.0)) * 1.05;
@@ -176,8 +177,10 @@ void main(){
     vec3 q = vec3(fbm(w * 2.0, 3, 2.1, 0.5), fbm(w * 2.0 + 3.1, 3, 2.1, 0.5), fbm(w * 2.0 + 7.3, 3, 2.1, 0.5));
     float c = fbm(w * 1.3 + q * 1.4, 6, 2.25, 0.55);
     float wisp = fbm(p * 12.0 + q * 2.0 + 41.0, 4, 2.4, 0.5);
-    float a = smoothstep(0.16, 0.56, c * band + wisp * 0.20 * band);
-    gl_FragColor = vec4(vec3(1.0), clamp(a, 0.0, 1.0));
+    float clouds = smoothstep(0.16, 0.56, c * band + wisp * 0.20 * band);
+    float relief = clamp(elev * 0.62, 0.0, 1.0);
+    float rough = mix(0.16, 0.92, smoothstep(0.35, 0.62, land));
+    gl_FragColor = vec4(relief, rough, clouds, 1.0);
   }
 }`;
 
@@ -185,7 +188,9 @@ function renderToTexture(renderer, size, mode, seed) {
   const rt = new THREE.WebGLRenderTarget(size, size / 2, {
     format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
     minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
-    generateMipmaps: true, colorSpace: THREE.SRGBColorSpace, depthBuffer: false,
+    generateMipmaps: true, depthBuffer: false,
+    // Farbkarten in sRGB, Datenkarten linear
+    colorSpace: mode === 2 ? THREE.NoColorSpace : THREE.SRGBColorSpace,
   });
   rt.texture.wrapS = THREE.RepeatWrapping;
   rt.texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -208,12 +213,42 @@ function renderToTexture(renderer, size, mode, seed) {
   return rt.texture;
 }
 
+/** Notfallvariante, falls die Bilddaten nicht geladen werden können. */
 export function generateEarthTextures(renderer, size = 2048, seed = 3.7) {
   return {
     day: renderToTexture(renderer, size, 0, seed),
     night: renderToTexture(renderer, Math.min(size, 1024), 1, seed),
-    clouds: renderToTexture(renderer, Math.min(size, 1536), 2, seed),
+    brc: renderToTexture(renderer, Math.min(size, 2048), 2, seed),
+    procedural: true,
   };
+}
+
+/**
+ * Lädt die Satellitenkarten der Erde.
+ *   earth_day    — Blue-Marble-Mosaik der NASA
+ *   earth_night  — Nachtlichter (VIIRS / Black Marble)
+ *   earth_brc    — R Relief, G Rauheit, B Wolken
+ */
+export function loadEarthTextures(base = './assets/planet/', onProgress) {
+  const loader = new THREE.TextureLoader();
+  const files = [
+    ['day', 'earth_day_4096.jpg', THREE.SRGBColorSpace],
+    ['night', 'earth_night_4096.jpg', THREE.SRGBColorSpace],
+    ['brc', 'earth_bump_roughness_clouds_4096.jpg', THREE.NoColorSpace],
+  ];
+  let done = 0;
+  return Promise.all(files.map(([key, file, cs]) => new Promise((res, rej) => {
+    loader.load(base + file, tex => {
+      tex.colorSpace = cs;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = true;
+      onProgress?.(++done / files.length, key);
+      res([key, tex]);
+    }, undefined, rej);
+  }))).then(pairs => Object.fromEntries(pairs));
 }
 
 /* ───────────────────── Erdmaterial ───────────────────── */
@@ -230,57 +265,92 @@ void main(){
 
 const EARTH_FRAG = /* glsl */`
 precision highp float;
-uniform sampler2D tDay, tNight;
+uniform sampler2D tDay, tNight, tBRC;
 uniform vec3 uSun, uCam;
-uniform float uTime;
+uniform float uTime, uDrift, uBump, uDetail;
 varying vec2 vUv; varying vec3 vN; varying vec3 vPos; varying vec3 vObj;
 ${NOISE}
 
+const vec2 TEXEL = vec2(1.0 / 4096.0, 1.0 / 2048.0);
+
 void main(){
-  vec4 day = texture2D(tDay, vUv);
-  vec3 albedo = day.rgb;
-  float ocean = day.a;
-
-  /* Aus 600 km Höhe blickt man auf wenige hundert Kilometer Boden — dafür ist
-     jede Basistextur zu grob. Hochfrequentes Rauschen liefert die Feinstruktur:
-     Flussläufe, Felder, Gebirgszüge, Wellenmuster auf dem Wasser. */
-  float d1 = fbm(vObj * 260.0, 4, 2.55, 0.55);
-  float d2 = fbm(vObj * 1500.0, 3, 2.4, 0.5);
-  float land = 1.0 - ocean;
-  albedo *= 1.0 + (d1 * 0.38 + d2 * 0.16) * land;
-  albedo *= 1.0 + (d1 * 0.10 + d2 * 0.05) * ocean;
-  albedo = max(albedo, vec3(0.0));
-
   vec3 N = normalize(vN);
   vec3 L = normalize(uSun);
   vec3 V = normalize(uCam - vPos);
-  float ndl = dot(N, L);
 
-  // weicher Terminator — die Atmosphäre streut Licht über die Tag-Nacht-Grenze
+  /* Tangentenraum der Kugel — für Reliefschattierung und Wolkenschatten */
+  vec3 up = abs(N.y) > 0.995 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+  vec3 T = normalize(cross(up, N));
+  vec3 B = cross(N, T);
+
+  /* R = Relief, G = Rauheit, B = Wolken */
+  vec3 brc = texture2D(tBRC, vUv).rgb;
+  float rough = brc.g;
+
+  /* Relief in die Normale einrechnen: Gebirge werfen im Streiflicht Schatten */
+  float hx = texture2D(tBRC, vUv + vec2(TEXEL.x, 0.0)).r - texture2D(tBRC, vUv - vec2(TEXEL.x, 0.0)).r;
+  float hy = texture2D(tBRC, vUv + vec2(0.0, TEXEL.y)).r - texture2D(tBRC, vUv - vec2(0.0, TEXEL.y)).r;
+  vec3 Nb = normalize(N + (T * hx + B * hy) * uBump);
+
+  float ndl = dot(Nb, L);
   float lambert = clamp(ndl, 0.0, 1.0);
-  float soft = smoothstep(-0.18, 0.22, ndl);
+  /* Weicher Terminator: die Atmosphäre streut Licht über die Tag-Nacht-Grenze */
+  float soft = smoothstep(-0.16, 0.20, dot(N, L));
 
-  vec3 col = albedo * lambert * 1.25;
-  col += albedo * soft * 0.10;
+  /* Wolken driften langsam gegen die Oberfläche */
+  vec2 cuv = vec2(fract(vUv.x + uDrift), vUv.y);
+  float clouds = texture2D(tBRC, cuv).b;
+  /* Aus dieser Nähe sind die Wolkenfelder der Karte nur noch Flecken — mit
+     hochfrequentem Rauschen brechen die Ränder in Zellen und Schlieren auf. */
+  float cNoise = fbm(vObj * 430.0, 4, 2.5, 0.55);
+  float cFine  = fbm(vObj * 2100.0, 3, 2.4, 0.5);
+  float edge = smoothstep(0.02, 0.45, clouds) * (1.0 - smoothstep(0.80, 1.0, clouds));
+  clouds = clamp(clouds + (cNoise * 0.34 + cFine * 0.13) * edge * uDetail, 0.0, 1.0);
 
-  // Spiegelung der Sonne auf dem Wasser
+  /* Wolkenschatten: die Schicht liegt höher, der Schatten fällt versetzt */
+  vec3 Lt = vec3(dot(L, T), dot(L, B), dot(L, N));
+  vec2 off = -Lt.xy / max(abs(Lt.z), 0.30) * 0.0019;
+  float shade = texture2D(tBRC, vec2(fract(cuv.x + off.x), clamp(cuv.y + off.y, 0.002, 0.998))).b;
+
+  vec3 albedo = texture2D(tDay, vUv).rgb;
+
+  /* Aus 600 km blickt man auf wenige hundert Kilometer Boden — dafür reichen
+     4096 Texel nicht. Hochfrequentes Rauschen ergänzt die Feinstruktur. */
+  float wet = 1.0 - smoothstep(0.34, 0.60, rough);
+  float d1 = fbm(vObj * 300.0, 4, 2.55, 0.55);
+  float d2 = fbm(vObj * 1700.0, 3, 2.4, 0.5);
+  albedo *= 1.0 + (d1 * 0.30 + d2 * 0.13) * (1.0 - wet) * uDetail;
+  albedo *= 1.0 + (d1 * 0.07 + d2 * 0.03) * wet * uDetail;
+
+  /* Oberfläche im Sonnenlicht, abgedunkelt durch Wolkenschatten */
+  float shadow = 1.0 - smoothstep(0.18, 0.72, shade) * 0.52;
+  vec3 col = albedo * lambert * shadow * 1.55;
+  col += albedo * soft * 0.06;
+
+  /* Sonnenglanz auf dem Wasser — enger und heller als auf Land */
   vec3 H = normalize(L + V);
-  float spec = pow(clamp(dot(N, H), 0.0, 1.0), 180.0) * ocean * soft;
-  col += vec3(1.0, 0.95, 0.85) * spec * 1.1;
-  // breiterer Glanzschleier auf dem Wasser
-  col += vec3(0.35, 0.55, 0.85) * pow(clamp(dot(N, H), 0.0, 1.0), 20.0) * ocean * soft * 0.11;
+  float nh = clamp(dot(Nb, H), 0.0, 1.0);
+  col += vec3(1.0, 0.96, 0.88) * pow(nh, mix(40.0, 1100.0, wet)) * wet * soft * shadow * 2.2;
+  col += vec3(0.35, 0.55, 0.85) * pow(nh, 18.0) * wet * soft * 0.10;
 
-  // Nachtseite: Städte
-  float night = smoothstep(0.08, -0.22, ndl);
-  float lights = texture2D(tNight, vUv).r;
-  float flicker = 0.93 + 0.07 * sin(uTime * 0.7 + vUv.x * 320.0) * sin(uTime * 0.31 + vUv.y * 210.0);
-  col += vec3(1.0, 0.72, 0.38) * lights * night * 0.16 * flicker;
-  col += albedo * night * 0.012;
+  /* Nachtseite: Städte, von Wolken verdeckt */
+  float night = smoothstep(0.06, -0.20, ndl);
+  float flicker = 0.94 + 0.06 * sin(uTime * 0.7 + vUv.x * 340.0) * sin(uTime * 0.29 + vUv.y * 220.0);
+  vec3 lights = texture2D(tNight, vUv).rgb;
+  col += lights * night * 0.85 * flicker * (1.0 - smoothstep(0.1, 0.7, clouds) * 0.75);
+  col += albedo * night * 0.010;
 
-  // Rayleigh-Anteil: zur Silhouette hin bläulicher
-  // Rayleigh-Streuung: zum Rand hin blauer und aufgehellt
+  /* Wolken darüberlegen */
+  float cl = smoothstep(0.12, 0.82, clouds);
+  vec3 cloudCol = mix(vec3(0.020, 0.028, 0.045), vec3(1.30, 1.31, 1.36), lambert);
+  /* Wolkentürme werfen Schatten auf sich selbst — das gibt ihnen Volumen */
+  cloudCol *= 0.80 + 0.34 * (cNoise * 0.6 + cFine * 0.4) * uDetail + 0.20 * smoothstep(0.5, 1.0, clouds);
+  cloudCol = mix(cloudCol, vec3(1.35, 1.02, 0.74), pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.4) * 0.35 * soft);
+  col = mix(col, cloudCol, cl * 0.93);
+
+  /* Rayleigh-Streuung: zur Silhouette hin blauer und aufgehellt */
   float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.8);
-  col = mix(col, col * vec3(0.45, 0.72, 1.30) + vec3(0.008, 0.024, 0.058), rim * 0.66 * soft);
+  col = mix(col, col * vec3(0.45, 0.72, 1.32) + vec3(0.010, 0.030, 0.072), rim * 0.68 * soft);
 
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -293,39 +363,17 @@ void main(){
   vec3 N = normalize(vN);
   vec3 V = normalize(uCam - vPos);
   vec3 L = normalize(uSun);
-  float rim = pow(clamp(1.0 - abs(dot(N, V)), 0.0, 1.0), 3.1);
-  float lit = smoothstep(-0.42, 0.38, dot(N, L));
-  // Vorwärtsstreuung: am Sonnenrand heller und wärmer
-  float fwd = pow(clamp(dot(V, -L), 0.0, 1.0), 6.0);
-  vec3 blue = vec3(0.30, 0.58, 1.0);
-  vec3 warm = vec3(1.0, 0.62, 0.34);
-  vec3 c = mix(blue, warm, fwd * 0.7);
-  float a = rim * lit * 0.48;
-  gl_FragColor = vec4(c * (0.32 + fwd * 1.2), a);
-}`;
-
-const CLOUD_FRAG = /* glsl */`
-precision highp float;
-uniform sampler2D tClouds;
-uniform vec3 uSun, uCam;
-uniform float uTime;
-varying vec2 vUv; varying vec3 vN; varying vec3 vPos;
-void main(){
-  vec2 uv1 = vec2(vUv.x + uTime * 0.0016, vUv.y);
-  vec2 uv2 = vec2(vUv.x * 1.37 - uTime * 0.0009, vUv.y * 1.37 + 0.21);
-  float a = texture2D(tClouds, uv1).a;
-  float b = texture2D(tClouds, uv2).a;
-  float d = clamp(a * 0.70 + b * 0.42 - 0.22, 0.0, 1.0);
-  if(d < 0.012) discard;
-  vec3 N = normalize(vN);
-  vec3 L = normalize(uSun);
-  float ndl = dot(N, L);
-  float soft = smoothstep(-0.16, 0.26, ndl);
-  vec3 V = normalize(uCam - vPos);
-  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.0);
-  vec3 c = mix(vec3(0.022, 0.030, 0.048), vec3(0.86, 0.88, 0.95), clamp(ndl, 0.0, 1.0));
-  c = mix(c, vec3(0.98, 0.76, 0.56), rim * 0.45 * soft);
-  gl_FragColor = vec4(c, d * (0.08 + soft * 0.88));
+  /* Die Schale wird von innen gesehen: der Rand ist die dickste Luftsäule */
+  float rim = pow(clamp(1.0 - abs(dot(N, V)), 0.0, 1.0), 3.0);
+  float lit = smoothstep(-0.38, 0.30, dot(N, L));
+  /* Vorwärtsstreuung — beim Sonnenaufgang wird der Saum orange */
+  float fwd = pow(clamp(dot(V, -L), 0.0, 1.0), 7.0);
+  float graze = smoothstep(0.35, 0.0, abs(dot(N, L)));      // Terminatorband
+  vec3 blue = vec3(0.26, 0.52, 1.0);
+  vec3 warm = vec3(1.0, 0.45, 0.22);
+  vec3 c = mix(blue, warm, clamp(fwd * 0.8 + graze * 0.55, 0.0, 1.0));
+  float a = rim * lit * 0.55;
+  gl_FragColor = vec4(c * (0.34 + fwd * 1.6 + graze * 0.5), a);
 }`;
 
 /* ───────────────────── Sterne ───────────────────── */
@@ -393,42 +441,67 @@ export function createStars(count = 7000, radius = 4200) {
 export function createSun(distance = 3600) {
   const g = new THREE.Group();
   const mat = new THREE.ShaderMaterial({
-    uniforms: {},
+    uniforms: { uFade: { value: 1 } },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: /* glsl */`
+      uniform float uFade;
       varying vec2 vUv;
       void main(){
         float r = length(vUv - 0.5) * 2.0;
-        float disc = smoothstep(0.135, 0.105, r);
-        float glow = pow(smoothstep(1.0, 0.0, r), 2.6) * 0.55;
-        float halo = pow(smoothstep(1.0, 0.0, r), 8.0) * 0.9;
-        vec3 c = mix(vec3(1.0, 0.86, 0.66), vec3(1.0), disc);
-        float a = clamp(disc + glow * 0.55 + halo, 0.0, 1.0);
+        float disc = smoothstep(0.116, 0.088, r);
+        float bloom = pow(smoothstep(1.0, 0.0, r), 9.0) * 0.85;
+        float halo = pow(smoothstep(1.0, 0.0, r), 2.4) * 0.22;
+        vec3 c = mix(vec3(1.0, 0.88, 0.70), vec3(1.0), disc);
+        float a = clamp(disc * 1.6 + bloom + halo, 0.0, 2.0) * uFade;
         if(a < 0.004) discard;
-        gl_FragColor = vec4(c, a);
+        gl_FragColor = vec4(c * (0.7 + disc * 2.2), a);
       }`,
-    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+    // Tiefentest bleibt an: Die Erde verdeckt die Sonne, so entsteht der
+    // Sonnenaufgang über dem Horizont von selbst.
+    transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
   });
-  const sprite = new THREE.Mesh(new THREE.PlaneGeometry(distance * 0.17, distance * 0.17), mat);
-  sprite.renderOrder = -5;
+  const sprite = new THREE.Mesh(new THREE.PlaneGeometry(distance * 0.2, distance * 0.2), mat);
+  sprite.renderOrder = 6;
   g.add(sprite);
-  g.userData = { sprite, distance };
+  g.userData = { sprite, distance, mat };
   return g;
+}
+
+/* ───────────────────── Geografie auf der Kugel ───────────────────── */
+const UP = new THREE.Vector3(0, 1, 0);
+const D2R = Math.PI / 180;
+/* Bei three.js beginnt die Kugel-UV bei phi = 0 an der Texturkante, die auf
+ * einer Weltkarte dem 180. Längengrad entspricht — Greenwich liegt in der Mitte. */
+const LON_OFFSET = Math.PI;
+
+/** Einheitsvektor im Modellraum der Kugel für geografische Koordinaten. */
+function geoToVec(lat, lon) {
+  const theta = (90 - lat) * D2R;             // Kolatitude, 0 am Nordpol
+  const phi = lon * D2R + LON_OFFSET;
+  const st = Math.sin(theta);
+  return new THREE.Vector3(-Math.cos(phi) * st, Math.cos(theta), Math.sin(phi) * st);
+}
+/** Tangente Richtung Nordpol am Punkt (lat, lon). */
+function northTangent(lat, lon) {
+  const theta = (90 - lat) * D2R;
+  const phi = lon * D2R + LON_OFFSET;
+  const ct = Math.cos(theta), st = Math.sin(theta);
+  return new THREE.Vector3(Math.cos(phi) * ct, st, -Math.sin(phi) * ct).normalize();
 }
 
 /* ───────────────────── Der komplette Himmel ───────────────────── */
 export class Sky {
   /**
    * @param {THREE.WebGLRenderer} renderer
+   * @param {object} tex  {day, night, brc} — geladen oder prozedural erzeugt
    * @param {number} segs Kugelsegmente je nach Qualitätsstufe
    */
-  constructor(renderer, segs = 128, texSize = 2048) {
+  constructor(renderer, tex, segs = 128) {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(52, 1, 1, 12000);
-    this.tex = generateEarthTextures(renderer, texSize);
+    this.camera = new THREE.PerspectiveCamera(52, 1, 1, 14000);
+    this.tex = tex;
 
-    /* Der Sichtwinkel der Erde aus 600 km Höhe beträgt 132°.
-       Also: sin(halber Winkel) = R / D. */
+    /* Aus 600 km Höhe misst die Erde 132° am Himmel: sin(halber Winkel) = R/D. */
     const R = 900;
     const D = R / Math.sin(EARTH_ANGULAR * 0.5 * Math.PI / 180);
     this.earthRadius = R; this.earthDistance = D;
@@ -437,37 +510,33 @@ export class Sky {
       uSun: { value: new THREE.Vector3(1, 0, 0) },
       uCam: { value: new THREE.Vector3() },
       uTime: { value: 0 },
+      uDrift: { value: 0 },
+      uBump: { value: tex.procedural ? 9.0 : 14.0 },
+      uDetail: { value: 1 },
     };
 
     const earthMat = new THREE.ShaderMaterial({
       uniforms: {
-        tDay: { value: this.tex.day }, tNight: { value: this.tex.night },
+        tDay: { value: tex.day }, tNight: { value: tex.night }, tBRC: { value: tex.brc },
         uSun: this.uniforms.uSun, uCam: this.uniforms.uCam, uTime: this.uniforms.uTime,
+        uDrift: this.uniforms.uDrift, uBump: this.uniforms.uBump, uDetail: this.uniforms.uDetail,
       },
       vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     });
     this.earth = new THREE.Mesh(new THREE.SphereGeometry(R, segs, segs / 2), earthMat);
-
-    const cloudMat = new THREE.ShaderMaterial({
-      uniforms: {
-        tClouds: { value: this.tex.clouds },
-        uSun: this.uniforms.uSun, uCam: this.uniforms.uCam, uTime: this.uniforms.uTime,
-      },
-      vertexShader: EARTH_VERT, fragmentShader: CLOUD_FRAG,
-      transparent: true, depthWrite: false,
-    });
-    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(R * 1.007, Math.max(64, segs / 2), Math.max(32, segs / 4)), cloudMat);
+    this.earth.renderOrder = 0;
 
     const atmoMat = new THREE.ShaderMaterial({
       uniforms: { uSun: this.uniforms.uSun, uCam: this.uniforms.uCam },
       vertexShader: EARTH_VERT, fragmentShader: ATMO_FRAG,
       transparent: true, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending,
     });
-    this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.055, 96, 48), atmoMat);
+    this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.042, 96, 48), atmoMat);
+    this.atmo.renderOrder = 2;
 
     this.earthGroup = new THREE.Group();
-    this.earthGroup.add(this.earth, this.clouds, this.atmo);
-    this.earthGroup.position.set(0, -D, 0);          // Erde unter der Station
+    this.earthGroup.add(this.earth, this.atmo);
+    this.earthGroup.position.set(0, -D, 0);
     this.scene.add(this.earthGroup);
 
     this.stars = createStars(7000, 5200);
@@ -480,7 +549,20 @@ export class Sky {
     this.spin = 0;
   }
 
-  /** Sonnenrichtung (Einheitsvektor) und Erdrotation setzen. */
+  /** Erzeugt den Himmel; nutzt die Satellitenkarten, notfalls prozedurale Daten. */
+  static async create(renderer, segs = 128, texSize = 2048, onProgress) {
+    let tex;
+    try {
+      tex = await loadEarthTextures('./assets/planet/', onProgress);
+      for (const t of Object.values(tex)) if (t.isTexture) t.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+    } catch (e) {
+      console.warn('[sky] Satellitenkarten nicht verfügbar, erzeuge Ersatzdaten', e);
+      tex = generateEarthTextures(renderer, texSize);
+    }
+    return new Sky(renderer, tex, segs);
+  }
+
+  /** Sonnenrichtung (Einheitsvektor) setzen. */
   setSun(dir) {
     this.sunDir.copy(dir).normalize();
     this.uniforms.uSun.value.copy(this.sunDir).multiplyScalar(4000);
@@ -489,18 +571,40 @@ export class Sky {
     this.sun.lookAt(0, 0, 0);
   }
 
-  update(dt, t) {
+  /**
+   * Richtet die Erde so aus, dass der Subsatellitenpunkt zur Station zeigt und
+   * die Flugrichtung nach +X weist. Dadurch zieht unter der Station wirklich
+   * die Geografie durch, die die Bodenspur ausrechnet.
+   */
+  setGroundTrack(t) {
+    const { lat, lon } = groundTrack(t);
+    const h = groundHeading(t) * Math.PI / 180;
+    const p = geoToVec(lat, lon);
+    const q = new THREE.Quaternion().setFromUnitVectors(p, UP);
+
+    // Nordrichtung am Subsatellitenpunkt, nach der Drehung
+    const north = northTangent(lat, lon).applyQuaternion(q);
+    const east = new THREE.Vector3().crossVectors(north, UP).normalize();
+    const dir = north.multiplyScalar(Math.cos(h)).addScaledVector(east, Math.sin(h));
+    const ang = Math.atan2(dir.z, dir.x);
+    const roll = new THREE.Quaternion().setFromAxisAngle(UP, -ang);
+
+    this.earth.quaternion.copy(roll).multiply(q);
+    this.atmo.quaternion.copy(this.earth.quaternion);
+    this.track = { lat, lon, heading: h * 180 / Math.PI };
+  }
+
+  update(dt, t, now) {
     this.uniforms.uTime.value = t;
-    this.spin += dt * 0.0038;                    // Bodenspur unter der Station
-    this.earth.rotation.y = this.spin;
-    this.clouds.rotation.y = this.spin * 1.06 + 0.4;
+    this.uniforms.uDrift.value += dt * 0.00016;     // Wolken ziehen gegen die Oberfläche
+    this.setGroundTrack(now ?? Date.now());
     if (this.stars.userData.mat) {
       this.stars.userData.mat.uniforms.uTime.value = t;
       this.stars.userData.mat.uniforms.uScale.value = window.innerHeight;
     }
   }
 
-  /** Kamera übernimmt nur die Drehung der Hauptkamera — der Himmel ist unendlich weit weg. */
+  /** Kamera übernimmt nur die Drehung — der Himmel ist Hunderte Kilometer weit weg. */
   syncTo(camera) {
     this.camera.quaternion.copy(camera.quaternion);
     this.camera.fov = camera.fov;
@@ -509,6 +613,5 @@ export class Sky {
     this.uniforms.uCam.value.set(0, 0, 0);
   }
 
-  /** Nur die Erde soll sich mitdrehen, wenn die Station ihre Lage ändert. */
   setAttitude(quat) { this.earthGroup.quaternion.copy(quat); }
 }

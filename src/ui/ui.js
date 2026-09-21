@@ -47,8 +47,11 @@ export const UI = {
     document.addEventListener('pointerover', e => {
       const t = e.target.closest('[data-tip]');
       if (!t) return this.hideTip();
-      this.showTip(t.dataset.tip, e.clientX, e.clientY);
+      this.showTip(t.dataset.tip, e.clientX, e.clientY, t);
     });
+    document.addEventListener('pointerdown', () => { this._dragging = true; });
+    document.addEventListener('pointerup', () => { this._dragging = false; });
+    document.addEventListener('pointercancel', () => { this._dragging = false; });
     document.addEventListener('pointermove', e => {
       if (!this.els.tip.hidden) this.moveTip(e.clientX, e.clientY);
     });
@@ -64,7 +67,7 @@ export const UI = {
   buildRooms() {
     const app = this.app, st = app.st;
     const box = clear(this.els.rooms);
-    const order = ['lounge', 'grow_a', 'hydro', 'vertical', 'mycology', 'dome', 'lab', 'systems', 'cargo'];
+    const order = ['lounge', 'cupola', 'grow_a', 'hydro', 'vertical', 'mycology', 'dome', 'lab', 'systems', 'cargo'];
     for (const id of order) {
       const def = MOD_BY_ID[id];
       if (!def) continue;
@@ -116,20 +119,40 @@ export const UI = {
   },
   close() {
     this.panel = null;
+    this._panelKey = null;
     clear(this.els.stage);
     this.buildRooms();
   },
-  render() {
+
+  /** Bedient der Spieler gerade etwas? Dann nicht dazwischenfunken. */
+  isBusy() {
+    if (this._dragging) return true;
+    const a = document.activeElement;
+    return !!(a && a !== document.body && this.els.stage.contains(a));
+  },
+
+  /**
+   * @param {{auto?:boolean}} opts auto = turnusmäßige Aktualisierung
+   */
+  render(opts = {}) {
     if (!this.panel) return;
     const fn = Panels[this.panel.id];
     if (!fn) return;
-    const scrollTop = $('.panel__body', this.els.stage)?.scrollTop;
+    const key = this.panel.id + '\u0000' + (this.panel.arg ?? '');
+    const same = this._panelKey === key && !!this.els.stage.firstElementChild;
+    // Slider ziehen, Zahl eintippen: dann bleibt das Panel, wie es ist
+    if (same && opts.auto && this.isBusy()) return;
+    const scrollTop = $('.panel__body', this.els.stage)?.scrollTop || 0;
     const node = fn(this.app, this.panel.arg, this);
+    // Die Einblendbewegung gehört zum Öffnen, nicht zu jeder Aktualisierung
+    if (same) node.style.animation = 'none';
     clear(this.els.stage).append(node);
+    this._panelKey = key;
     if (scrollTop) { const b = $('.panel__body', this.els.stage); if (b) b.scrollTop = scrollTop; }
+    if (this._tipNode && !document.contains(this._tipNode)) this.hideTip();
   },
-  refresh() {
-    if (this.panel) this.render();
+  refresh(opts) {
+    if (this.panel) this.render(opts);
     this.buildRooms();
   },
 
@@ -236,10 +259,11 @@ export const UI = {
   },
   closeModal() { this.els.modal.hidden = true; sfx.close(); },
 
-  showTip(html, x, y) {
+  showTip(html, x, y, node) {
     const t = this.els.tip;
     t.innerHTML = html;
     t.hidden = false;
+    this._tipNode = node || null;
     this.moveTip(x, y);
   },
   moveTip(x, y) {
@@ -251,5 +275,5 @@ export const UI = {
     t.style.left = Math.max(8, nx) + 'px';
     t.style.top = Math.max(8, ny) + 'px';
   },
-  hideTip() { this.els.tip.hidden = true; },
+  hideTip() { this.els.tip.hidden = true; this._tipNode = null; },
 };

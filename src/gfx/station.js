@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { mats } from './materials.js';
 import { MOD_BY_ID } from '../data/modules.js';
+import { TAU, clamp } from '../core/util.js';
 
 /* Position, Ausrichtung und Größe jedes Moduls am Gerüst.
  * −Y zeigt zur Erde, +Y zum Zenit. */
@@ -12,6 +13,7 @@ export const LAYOUT = {
   cargo:    { pos: [-11.5, 0, 0], len: 4.2, rad: 1.5, axis: 'x', color: 0xcfd3d6 },
   systems:  { pos: [-5.6, 0, 0], len: 5.6, rad: 1.85, axis: 'x', color: 0xe6e8e4 },
   lounge:   { pos: [0, 0, 5.4], len: 5.0, rad: 2.15, axis: 'z', color: 0xf2f3ef, window: true },
+  cupola:   { pos: [0, -3.4, 2.2], len: 1.9, rad: 1.5, axis: 'y', color: 0xdfe6ec, cupola: true },
   grow_a:   { pos: [5.6, 0, 0], len: 5.6, rad: 1.85, axis: 'x', color: 0xeef0ea },
   lab:      { pos: [11.4, 0, 0], len: 5.0, rad: 1.7, axis: 'x', color: 0xe4e8ea },
   hydro:    { pos: [0, 0, -5.6], len: 5.4, rad: 1.9, axis: 'z', color: 0xdfeaf0 },
@@ -73,6 +75,47 @@ function buildModule(id, cfg, M, built) {
     g.add(wire);
     g.position.fromArray(cfg.pos);
     g.userData.ghost = true;
+    return g;
+  }
+
+  if (cfg.cupola) {
+    // Sechseckiger Kegelstumpf zur Erdseite, mit Fensterläden
+    const hex = new THREE.Mesh(new THREE.CylinderGeometry(cfg.rad * .62, cfg.rad, cfg.len, 6, 1, false), M.hull);
+    hex.position.y = -cfg.len / 2;
+    hex.castShadow = hex.receiveShadow = true;
+    hex.userData.pickable = true; hex.userData.moduleId = id;
+    g.add(hex);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(cfg.rad * 1.02, cfg.rad * 1.02, .22, 6), M.metal);
+    g.add(collar);
+    // Mittelscheibe
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(cfg.rad * .52, 28), new THREE.MeshPhysicalMaterial({
+      color: 0x0b1a2a, roughness: .03, metalness: .1, transparent: true, opacity: .85,
+      clearcoat: 1, emissive: 0x2a4a6a, emissiveIntensity: .35, side: THREE.DoubleSide,
+    }));
+    glass.rotation.x = Math.PI / 2;
+    glass.position.y = -cfg.len - .02;
+    glass.userData.pickable = true; glass.userData.moduleId = id;
+    g.add(glass);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(cfg.rad * .56, .07, 8, 30), M.metal);
+    ring.rotation.x = Math.PI / 2; ring.position.y = -cfg.len;
+    g.add(ring);
+    // Seitenfenster mit halb geöffneten Läden
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + Math.PI / 6;
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(cfg.rad * .78, cfg.len * .62), new THREE.MeshStandardMaterial({
+        color: 0x14293d, roughness: .06, metalness: .2, emissive: 0x2a5070, emissiveIntensity: .3,
+      }));
+      pane.position.set(Math.cos(a) * cfg.rad * .84, -cfg.len * .5, Math.sin(a) * cfg.rad * .84);
+      pane.lookAt(pane.position.clone().multiplyScalar(3));
+      g.add(pane);
+      const shut = new THREE.Mesh(new THREE.BoxGeometry(cfg.rad * .86, .05, cfg.len * .66), M.hullDark);
+      shut.position.copy(pane.position).multiplyScalar(1.16);
+      shut.position.y = -cfg.len * .12;
+      shut.rotation.y = -a;
+      shut.rotation.z = .9;
+      g.add(shut);
+    }
+    g.position.fromArray(cfg.pos);
     return g;
   }
 

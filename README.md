@@ -53,7 +53,8 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 | | |
 |---|---|
 | **Grafik** | Three.js (WebGL2), eigene Shader, Bloom & Filmkorn |
-| **Erde** | vollständig prozedural — Kontinente aus verzerrtem Simplex-Rauschen, Klimazonen nach Breitengrad, Städte an den Küsten, Wolkenbänder an der ITCZ |
+| **Erde** | Satellitenkarten der NASA (Albedo, Nachtlichter, Relief, Rauheit, Wolken) in einem eigenen Shader, ergänzt um prozedurale Feinstruktur — ohne die wäre der Blick aus 600 km verwaschen. Fehlen die Bilder, erzeugt das Spiel Ersatzkarten selbst |
+| **Bodenspur** | echt gerechnet: Die Erde dreht sich geografisch korrekt unter der Station durch, die Cupola sagt, worüber du gerade fliegst |
 | **Bahnmechanik** | echt gerechnet: Keplersche Umlaufzeit, Betawinkel, Schattenanteil |
 | **Musik** | generativ per Web Audio API — Drone, wandernde Akkordflächen, Glockentöne. Kein Audiomaterial, wiederholt sich praktisch nie |
 | **Speichern** | `localStorage`, dazu Export/Import als JSON |
@@ -61,9 +62,15 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 
 ### Räume
 
-Außenansicht (zugleich das Menü), Lounge mit Panoramafenster, Gewächsraum,
-Labor, Technik, Frachtschleuse — später Hydroponik-Modul, Pilzkammer,
-Vertikalfarm und ein Kuppelgewächshaus im echten Sonnenlicht.
+Außenansicht (zugleich das Menü), Lounge mit Panoramafenster, **Cupola** mit
+Rundumsicht, Gewächsraum, Labor, Technik, Frachtschleuse — später
+Hydroponik-Modul, Pilzkammer, Vertikalfarm und ein Kuppelgewächshaus im echten
+Sonnenlicht.
+
+Die Cupola ist der ISS-Aussichtskuppel nachempfunden: sechs trapezförmige
+Seitenfenster um eine runde Mittelscheibe, dazwischen nur Rahmen — der Blick
+nach draußen ist rundum frei. Von dort lassen sich Aufnahmen der überflogenen
+Region machen, die das Erdbeobachtungsprogramm vergütet.
 
 ### Lokal starten
 
@@ -88,6 +95,9 @@ src/
   ui/        ui (HUD), panels, icons
 vendor/three/
 ```
+
+Die Erdtexturen liegen unter `assets/planet/`, ihre Herkunft steht in
+`assets/planet/HERKUNFT.md`.
 
 Wer eigene Pflanzen hinzufügen will: `src/data/plants.js`. Ein Eintrag mit
 echten Werten für `days`, `dli`, `water`, `temp`, `ph` reicht — den Rest macht

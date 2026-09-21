@@ -43,10 +43,16 @@ const app = {
       try { const pre = load(); if (pre?.settings?.quality) quality = pre.settings.quality; } catch {}
       this.stage = new Stage($('#webgl-root'), quality);
 
-      await step(22, 'Erdtexturen werden berechnet …');
+      await step(18, 'Satellitenkarten der Erde werden geladen …');
       const segs = this.stage.q.segs;
       const texSize = this.stage.qualityName === 'low' ? 1024 : this.stage.qualityName === 'ultra' ? 4096 : 2048;
-      this.sky = new Sky(this.stage.renderer, segs, texSize);
+      this.sky = await Sky.create(this.stage.renderer, segs, texSize, (f, key) => {
+        const label = { day: 'Tagseite', night: 'Nachtlichter', brc: 'Relief & Wolken' }[key] || key;
+        step(18 + f * 34, `${label} geladen …`);
+      });
+
+      // Das prozedurale Feindetail kostet spürbar Füllrate
+      this.sky.uniforms.uDetail.value = this.stage.qualityName === 'low' ? 0 : 1;
 
       await step(52, 'Sterne werden gesetzt …');
       this.exterior = new Exterior(this.sky);
@@ -211,6 +217,7 @@ const app = {
     });
     UI.setRoomLabel(def.name, def.short + ' · Modul');
     const panelId = id === 'lounge' ? 'lounge'
+      : id === 'cupola' ? 'cupola'
       : id === 'lab' ? 'research'
       : id === 'systems' ? 'systems'
       : id === 'cargo' ? 'shop'
@@ -297,7 +304,11 @@ const app = {
     const ang = sol.phase * TAU;
     this.sunLocal.set(Math.cos(b) * Math.sin(ang), Math.cos(b) * Math.cos(ang), Math.sin(b)).normalize();
 
-    this.sky.update(dt, t);
+    this.sky.update(dt, t, nowMs);
+
+    // Die Sonne verschwindet hinter der Erde von selbst (Tiefentest); beim
+    // Auf- und Untergang dämpft die Atmosphäre sie zusätzlich.
+    this.sky.sun.userData.mat.uniforms.uFade.value = 0.30 + 0.70 * sol.sun;
 
     if (this.mode === 'exterior') {
       this.sky.setSun(this.sunLocal);
@@ -319,7 +330,7 @@ const app = {
     this.panelTimer = (this.panelTimer || 0) + dt;
     if (this.panelTimer > 3.5) {
       this.panelTimer = 0;
-      if (UI.panel && ['grow', 'lounge', 'research', 'shop', 'systems'].includes(UI.panel.id) && $('.modal[hidden]')) UI.render();
+      if (UI.panel && ['grow', 'lounge', 'research', 'shop', 'systems'].includes(UI.panel.id) && $('.modal[hidden]')) UI.render({ auto: true });
       this.syncScene();
     }
     this.mailTimer += dt;
@@ -343,7 +354,7 @@ const app = {
       else if (e.type === 'sick') UI.toast('warn', 'Befall', `${e.name}: ${e.what}`);
       else if (e.type === 'power') UI.toast('warn', 'Energie knapp', 'Der Akku ist leer — die Lampen werden abgeregelt.');
     }
-    if (log.length) { UI.refresh(); this.syncScene(); }
+    if (log.length) { UI.refresh({ auto: true }); this.syncScene(); }
   },
 
   save() { if (this.st) saveGame(this.st); },

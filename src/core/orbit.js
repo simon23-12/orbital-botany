@@ -121,3 +121,85 @@ export function meanSun(t0, t1) {
   for (let i = 0; i < steps; i++) s += solar(t0 + (t1 - t0) * (i + 0.5) / steps).sun;
   return s / steps;
 }
+
+/* ═══════════════════ Bodenspur ═══════════════════
+ *
+ * Wo steht die Station gerade über der Erde? Die Bahn ist um 51,6° geneigt,
+ * die Erde dreht sich darunter in einem Sterntag weg — deshalb verschiebt sich
+ * jeder Umlauf um gut 22° nach Westen und die Bodenspur bildet das bekannte
+ * Wellenmuster über der Weltkarte.
+ */
+const OMEGA_E = 360 / 86164.0905;   // °/s, siderische Erdrotation
+const NODE_DRIFT = -5.0;            // °/Tag, Knotendrift durch die Erdabplattung (J2)
+const LON0 = 47;                    // °, Knotenlängengrad zur Epoche
+
+/** Geografische Position des Subsatellitenpunkts. */
+export function groundTrack(t) {
+  const u = phase(t) * TAU;                    // Argument der Breite
+  const i = INCL * DEG;
+  const lat = Math.asin(Math.sin(i) * Math.sin(u)) / DEG;
+  const dLon = Math.atan2(Math.cos(i) * Math.sin(u), Math.cos(u)) / DEG;
+  const secs = (t - EPOCH) / 1000;
+  const node = LON0 + NODE_DRIFT * (secs / 86400);
+  let lon = dLon + node - OMEGA_E * secs;
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  return { lat, lon };
+}
+
+/** Bewegungsrichtung über Grund: 0° = Nord, 90° = Ost. */
+export function groundHeading(t) {
+  const a = groundTrack(t), b = groundTrack(t + 30_000);
+  let dLon = b.lon - a.lon;
+  if (dLon > 180) dLon -= 360; else if (dLon < -180) dLon += 360;
+  const dLat = b.lat - a.lat;
+  return (Math.atan2(dLon * Math.cos(a.lat * DEG), dLat) / DEG + 360) % 360;
+}
+
+/* Grobe Regionen entlang der befliegbaren Breiten. Land wird vor Wasser geprüft. */
+const REGIONS = [
+  ['Nordamerika · Westküste', 32, 52, -130, -114], ['Rocky Mountains', 31, 52, -114, -102],
+  ['Great Plains', 29, 52, -102, -88], ['Große Seen', 41, 50, -92, -76],
+  ['Nordamerika · Ostküste', 30, 48, -83, -66], ['Grönlandsee', 52, 60, -60, -20],
+  ['Mexiko', 15, 31, -117, -87], ['Karibik', 9, 26, -87, -60],
+  ['Amazonasbecken', -12, 6, -75, -48], ['Anden', -30, 8, -80, -66],
+  ['Brasilianisches Hochland', -25, -5, -58, -38], ['Gran Chaco', -33, -18, -66, -56],
+  ['Pampa', -40, -30, -66, -54], ['Patagonien', -52, -39, -74, -62],
+  ['Sahara', 18, 32, -14, 32], ['Sahelzone', 10, 18, -16, 38],
+  ['Westafrika', 4, 14, -18, 8], ['Kongobecken', -6, 5, 10, 30],
+  ['Ostafrika · Rift Valley', -12, 6, 30, 42], ['Kalahari', -30, -16, 14, 30],
+  ['Südafrika', -35, -28, 16, 33], ['Madagaskar', -26, -11, 43, 51],
+  ['Iberische Halbinsel', 36, 44, -10, 3], ['Mittelmeer', 30, 45, -6, 36],
+  ['Mitteleuropa', 45, 55, 3, 24], ['Britische Inseln', 49, 52, -11, 2],
+  ['Skandinavien', 52, 60, 4, 31], ['Osteuropa', 44, 52, 22, 45],
+  ['Naher Osten', 12, 38, 34, 60], ['Kaspisches Becken', 36, 48, 47, 62],
+  ['Zentralasien', 36, 52, 55, 88], ['Himalaya', 26, 38, 72, 98],
+  ['Indien', 8, 32, 68, 90], ['Südostasien', -10, 24, 92, 128],
+  ['Ostchina', 20, 45, 100, 122], ['Japan', 30, 46, 128, 146],
+  ['Indonesien', -11, 6, 95, 141], ['Australien', -39, -11, 113, 154],
+  ['Neuseeland', -47, -34, 166, 179], ['Sibirien', 45, 52, 60, 140],
+];
+const OCEANS = [
+  ['Nordatlantik', 0, 52, -70, -10], ['Südatlantik', -52, 0, -50, 20],
+  ['Nordpazifik', 0, 52, 130, 180], ['Nordpazifik', 0, 52, -180, -105],
+  ['Südpazifik', -52, 0, 150, 180], ['Südpazifik', -52, 0, -180, -75],
+  ['Indischer Ozean', -45, 25, 20, 118], ['Arabisches Meer', 5, 25, 55, 75],
+  ['Südlicher Ozean', -52, -45, -180, 180],
+  ['Golf von Mexiko', 18, 31, -97, -81], ['Karibisches Meer', 9, 22, -85, -60],
+  ['Südchinesisches Meer', 2, 23, 105, 121], ['Nordsee', 51, 52, -2, 9],
+  ['Schwarzes Meer', 41, 47, 28, 42], ['Rotes Meer', 13, 30, 33, 43],
+];
+const inBox = (lat, lon, [, a, b, c, d]) => lat >= Math.min(a, b) && lat <= Math.max(a, b) && lon >= c && lon <= d;
+
+/** Name der überflogenen Region. */
+export function regionAt(lat, lon) {
+  for (const r of REGIONS) if (inBox(lat, lon, r)) return r[0];
+  for (const r of OCEANS) if (inBox(lat, lon, r)) return r[0];
+  return Math.abs(lat) > 45 ? 'Hohe Breiten' : 'Offener Ozean';
+}
+
+/** Formatierte Koordinaten, z. B. „12,4° N · 33,8° O". */
+export function formatCoords(lat, lon) {
+  const ns = lat >= 0 ? 'N' : 'S', ew = lon >= 0 ? 'O' : 'W';
+  const f = v => Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${f(lat)}° ${ns} · ${f(lon)}° ${ew}`;
+}

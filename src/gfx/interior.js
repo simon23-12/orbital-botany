@@ -196,27 +196,27 @@ const ROOMS = {
     g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, openEnds: true, axis: 'z' }));
 
     /* Panoramafenster an der Stirnseite */
-    const wall = wallWithWindow(6.6, 6.6, 3.9, 2.35, .5, new THREE.MeshStandardMaterial({
+    const wall = wallWithWindow(7.6, 7.6, 4.95, 2.92, .55, new THREE.MeshStandardMaterial({
       color: 0xdadfe2, roughness: .6, metalness: .25,
     }), .3);
     wall.position.z = -3.75;
     g.add(wall);
     // Rahmen
-    const frameShape = roundedRectShape(4.16, 2.62, .6);
-    frameShape.holes.push(roundedRectShape(3.9, 2.35, .5));
+    const frameShape = roundedRectShape(5.22, 3.2, .66);
+    frameShape.holes.push(roundedRectShape(4.95, 2.92, .55));
     const frame = new THREE.Mesh(new THREE.ExtrudeGeometry(frameShape, { depth: .16, bevelEnabled: true, bevelSize: .02, bevelThickness: .02 }), M.metal);
     frame.position.z = -3.65;
     g.add(frame);
     // Scheibe
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(3.9, 2.35), new THREE.MeshBasicMaterial({
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(4.95, 2.92), new THREE.MeshBasicMaterial({
       color: 0x9fc4e8, transparent: true, opacity: .035, side: THREE.DoubleSide,
       depthWrite: false, blending: THREE.AdditiveBlending,
     }));
     glass.position.z = -3.68;
     g.add(glass);
     // Streben
-    for (const x of [-1.3, 1.3]) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(.06, 2.35, .1), M.metal);
+    for (const x of [-1.65, 1.65]) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(.06, 2.92, .1), M.metal);
       b.position.set(x, 0, -3.66);
       g.add(b);
     }
@@ -424,6 +424,127 @@ const ROOMS = {
 
     ctx.camera = { pos: new THREE.Vector3(0.05, 0.72, 3.15), look: new THREE.Vector3(0.95, -0.48, -3.6), fov: 60 };
     ctx.sunDirLocal = new THREE.Vector3(0, .1, -1);
+    return g;
+  },
+
+  /* ══ CUPOLA ══
+   * Nachbau der ISS-Aussichtskuppel: sechs trapezförmige Seitenfenster um eine
+   * runde Mittelscheibe. Es gibt bewusst keine Wandflächen zwischen den Rahmen —
+   * dadurch ist der Blick nach draußen wirklich rundum frei.
+   */
+  cupola(st, ctx) {
+    const M = mats();
+    const g = new THREE.Group();
+
+    const R1 = 1.62, Z1 = 0.22;        // oberer Ring, beim Betrachter
+    const R2 = 1.06, Z2 = -1.12;       // unterer Ring, Fassung der Mittelscheibe
+    // Matt und hell: die Rahmen nehmen das Erdlicht diffus auf, statt es zu spiegeln
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xd8dee4, roughness: .58, metalness: .30 });
+    const innerMat = new THREE.MeshStandardMaterial({ color: 0x8e979f, roughness: .55, metalness: .5, side: THREE.DoubleSide });
+    const paneMat = new THREE.MeshBasicMaterial({
+      color: 0x8fb8e0, transparent: true, opacity: .028, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+
+    const corner = (i, r, z) => {
+      const a = i * TAU / 6 + Math.PI / 6;
+      return new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, z);
+    };
+
+    /* Sechs Pfosten zwischen den Ringen, dazwischen je eine Scheibe */
+    for (let i = 0; i < 6; i++) {
+      const aTop = corner(i, R1, Z1), aBot = corner(i, R2, Z2);
+      const mid = aTop.clone().lerp(aBot, .5);
+      const len = aTop.distanceTo(aBot);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.085, .085, len), frameMat);
+      post.position.copy(mid);
+      post.lookAt(aBot);
+      g.add(post);
+
+      /* Trapezscheibe zwischen zwei Pfosten */
+      const bTop = corner(i + 1, R1, Z1), bBot = corner(i + 1, R2, Z2);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([
+        aTop.x, aTop.y, aTop.z, bTop.x, bTop.y, bTop.z, bBot.x, bBot.y, bBot.z,
+        aTop.x, aTop.y, aTop.z, bBot.x, bBot.y, bBot.z, aBot.x, aBot.y, aBot.z,
+      ], 3));
+      geo.computeVertexNormals();
+      const pane = new THREE.Mesh(geo, paneMat);
+      pane.renderOrder = 3;
+      g.add(pane);
+
+      /* Rahmenkante oben und unten */
+      for (const [p1, p2, w] of [[aTop, bTop, .075], [aBot, bBot, .065]]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(w, w, p1.distanceTo(p2)), frameMat);
+        bar.position.copy(p1).lerp(p2, .5);
+        bar.lookAt(p2);
+        g.add(bar);
+      }
+    }
+
+    /* Mittelscheibe — 80 cm, das größte Fenster, das je geflogen ist */
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R2 * .95, .042, 10, 44), frameMat);
+    ring.position.z = Z2;
+    g.add(ring);
+    const centre = new THREE.Mesh(new THREE.CircleGeometry(R2 * .93, 44), paneMat);
+    centre.position.z = Z2 + .01;
+    centre.renderOrder = 3;
+    g.add(centre);
+
+    /* Kragen hinter dem Betrachter: Übergang zum Modul */
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(R1 * 1.04, R1 * 1.04, 1.5, 6, 1, true), innerMat);
+    collar.rotation.x = Math.PI / 2;
+    collar.rotation.z = Math.PI / 6;
+    collar.position.z = Z1 + .74;
+    g.add(collar);
+    const back = new THREE.Mesh(new THREE.CircleGeometry(R1 * 1.04, 6), innerMat);
+    back.position.z = Z1 + 1.48;
+    back.rotation.z = Math.PI / 6;
+    g.add(back);
+    const hatch = new THREE.Mesh(new THREE.TorusGeometry(.56, .07, 8, 28), M.metal);
+    hatch.position.z = Z1 + 1.45;
+    g.add(hatch);
+
+    /* Handläufe an den Pfosten */
+    for (let i = 0; i < 6; i += 2) {
+      const a = i * TAU / 6 + Math.PI / 6;
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, .62, 8), M.metal);
+      bar.position.set(Math.cos(a) * (R1 * .82), Math.sin(a) * (R1 * .82), Z1 + .55);
+      bar.rotation.x = Math.PI / 2;
+      g.add(bar);
+    }
+
+    /* Klappsitz und ein Arbeitsbildschirm am Rahmen */
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(.62, .09, .46),
+      new THREE.MeshStandardMaterial({ map: fabricTexture('#2f3c4e'), color: 0x9fb0c4, roughness: .95 }));
+    seat.position.set(0, -R1 * .86, Z1 + .62);
+    seat.rotation.x = .12;
+    g.add(seat);
+    const scr = screen(.42, .27, .5);
+    scr.position.set(R1 * .62, R1 * .52, Z1 + .18);
+    scr.rotation.set(0, -.5, -.6);
+    g.add(scr);
+    ctx.screens = [scr];
+
+    /* Gedimmtes Licht — wer hinaussehen will, macht die Lampen aus */
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6;
+      const led = new THREE.PointLight(0xd8e4f2, .34, 3.0, 2);
+      led.position.set(Math.cos(a) * R1 * .8, Math.sin(a) * R1 * .8, Z1 + .3);
+      g.add(led);
+    }
+    g.add(new THREE.AmbientLight(0x2a3442, .45));
+    g.add(new THREE.HemisphereLight(0x6f92bb, 0x24282e, .35));
+    /* Die Erde selbst ist die hellste Lichtquelle hier drin — ihr Albedo liegt
+       bei rund 30 %, aus 600 km ist das ein Scheinwerfer von unten. */
+    const earthGlow = new THREE.DirectionalLight(0xbcd6f5, 2.2);
+    earthGlow.position.set(0, -4, -6);
+    g.add(earthGlow, earthGlow.target);
+    ctx.earthGlow = earthGlow;
+
+    /* Blickrichtung: 33° neben dem Nadir — dann liegt der Erdhorizont im Bild */
+    ctx.window = { mesh: centre, dir: new THREE.Vector3(0, -0.55, -0.84).normalize(), wide: true };
+    ctx.camera = { pos: new THREE.Vector3(0, 0, .82), look: new THREE.Vector3(0, -.05, -4.0), fov: 84 };
     return g;
   },
 
@@ -873,6 +994,7 @@ export class Interior {
     let g;
     const def = MOD_BY_ID[id];
     if (id === 'lounge') g = ROOMS.lounge(st, this.ctx);
+    else if (id === 'cupola') g = ROOMS.cupola(st, this.ctx);
     else if (id === 'lab') g = ROOMS.lab(st, this.ctx);
     else if (id === 'systems') g = ROOMS.systems(st, this.ctx);
     else if (id === 'cargo') g = ROOMS.cargo(st, this.ctx);
@@ -961,13 +1083,14 @@ export class Interior {
       d.applyAxisAngle(new THREE.Vector3(1, 0, 0), Math.cos(swing) * 0.22);
       this.sun.position.copy(d.multiplyScalar(-12));
       this.sun.target.position.set(0, -0.6, 0);
-      this.sun.intensity = lit * (this.ctx.window.small ? 1.0 : 3.4);
+      this.sun.intensity = lit * (this.ctx.window.small ? 1.0 : this.ctx.window.wide ? 2.2 : 3.4);
       this.sun.color.setHSL(0.09, 0.25 * (1 - lit * 0.5) + 0.05, 0.62);
     } else {
       this.sun.intensity = 0;
     }
 
     if (this.ctx.winFill) this.ctx.winFill.intensity = 0.5 + 2.6 * lit;
+    if (this.ctx.earthGlow) this.ctx.earthGlow.intensity = 0.35 + 2.4 * lit;
     for (const s of this.ctx.screens || []) s.userData.draw?.(t, this.ctx.screenLines || []);
     if (this.ctx.record) this.ctx.record.rotation.y = t * 3.3;
 
