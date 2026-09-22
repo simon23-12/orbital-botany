@@ -1,10 +1,19 @@
-/*  Innenräume der Station.
+/*  Innenräume der Station — begehbar.
  *
- *  Jeder Raum ist eine eigene kleine Bühne mit fester Kamera und sanfter
- *  Mausparallaxe. Der Himmel wird als eigene Szene dahinter gerendert — durch
- *  die Fensteröffnungen sieht man die echte Erde und den echten Sonnenstand.
+ *  Alle gebauten Module hängen an einem Knoten in der Mitte, als Ketten entlang
+ *  der Achsen: in Flugrichtung Gewächsraum, Labor, Vertikalfarm; dagegen
+ *  Technik und Frachtschleuse; seitlich die Lounge mit dem Panoramafenster,
+ *  gegenüber Hydroponik und Pilzkammer; unten zur Erde die Cupola, oben das
+ *  Kuppelgewächshaus. Zwischen den Modulen liegen kurze Durchstiege.
+ *
+ *  Man schwebt frei hindurch (Schwerelosigkeit, die Kamera bleibt aufrecht).
+ *  Wände hält ein Abstandsfeld aus einfachen Grundkörpern ab. Die Sonne
+ *  scheint mit echtem Stand und Schatten durch die Fenster; der Himmel wird
+ *  nur dort gerechnet, wo man tatsächlich hinaussieht.
  */
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
 import { buildPlant } from './plants3d.js';
 import { BY_ID as PLANT_BY_ID, stageAt } from '../data/plants.js';
@@ -123,10 +132,29 @@ function tray(size = 0.58, withLamp = true) {
 
 /* ───────────────────────── Raumdefinitionen ───────────────────────── */
 
+/** Durchmesser der Luken zwischen den Modulen */
+const HATCH_R = 0.8;
+
+/** Runde Stirnwand mit Durchstieg in der Mitte. */
+function portWall(rad, mat) {
+  const s = new THREE.Shape();
+  s.absarc(0, 0, rad, 0, TAU, false);
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, HATCH_R, 0, TAU, true);
+  s.holes.push(hole);
+  return new THREE.Mesh(new THREE.ShapeGeometry(s, 40), mat);
+}
+
+/**
+ * Zylindrischer Modulrumpf von innen.
+ * opts.ends = {neg, pos}: 'closed' (Stirnwand mit Deko-Luke), 'port'
+ * (offener Durchstieg zum Nachbarmodul) oder 'open' (keine Wand).
+ */
 function shell(len, rad, M, opts = {}) {
   const g = new THREE.Group();
   const axis = opts.axis || 'x';                 // Längsachse des Moduls
   const along = v => axis === 'x' ? new THREE.Vector3(v, 0, 0) : new THREE.Vector3(0, 0, v);
+  const ends = opts.ends || (opts.openEnds ? { neg: 'open', pos: 'open' } : { neg: 'closed', pos: 'closed' });
 
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(rad, rad, len, 32, 1, true),
@@ -137,6 +165,12 @@ function shell(len, rad, M, opts = {}) {
   if (axis === 'x') wall.rotation.z = Math.PI / 2; else wall.rotation.x = Math.PI / 2;
   wall.receiveShadow = true;
   g.add(wall);
+
+  /* Außenhaut: Von innen unsichtbar, aber aus der Kuppel oder durch ein
+     Fenster sieht man sonst die Einrichtung anderer Module frei schweben. */
+  const skin = new THREE.Mesh(new THREE.CylinderGeometry(rad + .08, rad + .08, len + .1, 32, 1, true), M.hull);
+  skin.rotation.copy(wall.rotation);
+  g.add(skin);
 
   const ft = floorTexture(); ft.repeat.set(len / 1.4, rad);
   const floor = new THREE.Mesh(
@@ -163,26 +197,47 @@ function shell(len, rad, M, opts = {}) {
     else { c.rotation.x = Math.PI / 2; c.position.set(o, y, 0); }
     g.add(c);
   }
-  // Endwände mit Durchstieg
-  if (!opts.openEnds) for (const sgn of [-1, 1]) {
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(rad, 32),
-      new THREE.MeshStandardMaterial({ color: 0xc3c9cd, roughness: .8, metalness: .15, side: THREE.DoubleSide }));
+  // Stirnwände
+  const capMat = new THREE.MeshStandardMaterial({ color: 0xc3c9cd, roughness: .8, metalness: .15, side: THREE.DoubleSide });
+  for (const [key, sgn] of [['neg', -1], ['pos', 1]]) {
+    const kind = ends[key];
+    if (kind === 'open') continue;
+    const rot = new THREE.Euler();
+    if (axis === 'x') rot.y = -sgn * Math.PI / 2; else if (sgn < 0) rot.y = Math.PI;
+    if (kind === 'port') {
+      const w = portWall(rad, capMat);
+      w.position.copy(along(sgn * len / 2));
+      w.rotation.copy(rot);
+      g.add(w);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R + .04, .065, 10, 40), M.metal);
+      ring.position.copy(along(sgn * (len / 2 - .03)));
+      ring.rotation.copy(rot);
+      g.add(ring);
+      continue;
+    }
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(rad, 32), capMat);
     cap.position.copy(along(sgn * len / 2));
-    if (axis === 'x') cap.rotation.y = -sgn * Math.PI / 2;
-    else if (sgn < 0) cap.rotation.y = Math.PI;
+    cap.rotation.copy(rot);
     g.add(cap);
     const hatch = new THREE.Mesh(new THREE.CircleGeometry(rad * .38, 24), M.hullDark);
     hatch.position.copy(along(sgn * (len / 2 - .01)));
     hatch.position.y = -rad * .18;
-    hatch.rotation.copy(cap.rotation);
+    hatch.rotation.copy(rot);
     g.add(hatch);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(rad * .4, .05, 8, 28), M.metal);
     ring.position.copy(hatch.position);
-    ring.rotation.copy(cap.rotation);
+    ring.rotation.copy(rot);
     g.add(ring);
   }
   return g;
 }
+
+/* Begehbare Bereiche: Schnitt aus Grundkörpern, in Raumkoordinaten. Die
+   Werte sind schon um den Abstand des Auges zur Wand verkleinert. */
+const cylR = (axis, c, r, h) => ({ type: 'cyl', axis, c, r, h });
+const boxR = (min, max) => ({ type: 'box', min, max });
+const sphR = (c, r) => ({ type: 'sph', c, r });
+const BIG = 50;
 
 /* ───────────────────────── Die Räume ───────────────────────── */
 
@@ -193,7 +248,14 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 7.6, RAD = 2.85;
-    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, openEnds: true, axis: 'z' }));
+    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, axis: 'z', ends: { neg: 'open', pos: 'port' } }));
+    // Außen hinter der Fensterwand
+    const hullBack = new THREE.Mesh(new THREE.CircleGeometry(RAD + .08, 32), M.hull);
+    hullBack.position.z = -3.95; hullBack.rotation.y = Math.PI;
+    g.add(hullBack);
+    ctx.dims = { outward: new THREE.Vector3(0, 0, -1), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('z', [0, 0, 0], RAD - .5, LEN / 2 - .35), boxR([-BIG, -1.2, -BIG], [BIG, BIG, BIG])]];
+    ctx.profile = { fov: 70, earth: 1.5 };
 
     /* Panoramafenster an der Stirnseite */
     const wall = wallWithWindow(7.6, 7.6, 4.95, 2.92, .55, new THREE.MeshStandardMaterial({
@@ -422,8 +484,7 @@ const ROOMS = {
     g.add(winFill);
     ctx.winFill = winFill;
 
-    ctx.camera = { pos: new THREE.Vector3(0.05, 0.72, 3.15), look: new THREE.Vector3(0.95, -0.48, -3.6), fov: 60 };
-    ctx.sunDirLocal = new THREE.Vector3(0, .1, -1);
+    ctx.camera = { pos: new THREE.Vector3(0.05, 0.4, 2.6), look: new THREE.Vector3(0.6, -0.6, -3.6) };
     return g;
   },
 
@@ -503,13 +564,26 @@ const ROOMS = {
     collar.rotation.z = Math.PI / 6;
     collar.position.z = COLLAR_START + .75;
     g.add(collar);
-    const back = new THREE.Mesh(new THREE.CircleGeometry(R1 * 1.04, 6), innerMat);
+    /* Rückwand mit Durchstieg nach oben in den Knoten */
+    const hex = new THREE.Shape();
+    for (let i = 0; i <= 6; i++) {
+      const a = i * TAU / 6 + Math.PI / 6;
+      const x = Math.cos(a) * R1 * 1.04 / Math.cos(Math.PI / 6), y = Math.sin(a) * R1 * 1.04 / Math.cos(Math.PI / 6);
+      i ? hex.lineTo(x, y) : hex.moveTo(x, y);
+    }
+    const hole = new THREE.Path(); hole.absarc(0, 0, HATCH_R, 0, TAU, true); hex.holes.push(hole);
+    const back = new THREE.Mesh(new THREE.ShapeGeometry(hex, 32), innerMat);
     back.position.z = COLLAR_START + 1.5;
-    back.rotation.z = Math.PI / 6;
     g.add(back);
-    const hatch = new THREE.Mesh(new THREE.TorusGeometry(.56, .07, 8, 28), M.metal);
+    const hatch = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R + .04, .07, 10, 36), M.metal);
     hatch.position.z = COLLAR_START + 1.47;
     g.add(hatch);
+    ctx.dims = { outward: new THREE.Vector3(0, 0, -1), inDist: COLLAR_START + 1.5, outDist: 1.3 };
+    ctx.walk = [
+      [cylR('z', [0, 0, 1.2], 1.45, 1.05)],
+      [cylR('z', [0, 0, -.35], .92, .55)],
+    ];
+    ctx.profile = { fov: 80 };
 
     /* Handläufe: Bügel, die längs auf den Pfosten sitzen — wie an jedem
        ISS-Modul. Quer durchs Fenster würden sie nur die Aussicht zerschneiden. */
@@ -559,12 +633,12 @@ const ROOMS = {
 
     /* Blickrichtung: 33° neben dem Nadir — dann liegt der Erdhorizont im Bild */
     ctx.window = { mesh: centre, dir: new THREE.Vector3(0, -0.55, -0.84).normalize(), wide: true };
-    ctx.camera = { pos: new THREE.Vector3(0, 0, .45), look: new THREE.Vector3(0, -.05, -4.0), fov: 84 };
+    ctx.camera = { pos: new THREE.Vector3(0, 0, .45), look: new THREE.Vector3(0, -1.6, -4.0) };
     return g;
   },
 
   /* ══ GEWÄCHSRÄUME (grow_a, hydro, vertical, mycology, dome) ══ */
-  grow(st, ctx, modId) {
+  grow(st, ctx, modId, ports = {}) {
     const M = mats();
     const def = MOD_BY_ID[modId];
     const g = new THREE.Group();
@@ -572,11 +646,13 @@ const ROOMS = {
     const n = slots.length;
 
     if (def.sunlit) return ROOMS.dome(st, ctx, modId, g, slots);
-    if (modId === 'vertical') return ROOMS.tower(st, ctx, modId, g, slots);
+    if (modId === 'vertical') return ROOMS.tower(st, ctx, modId, g, slots, ports);
 
     const dark = !!def.dark;
     const LEN = clamp(4.5 + n * 0.5, 5, 11), RAD = 2.4;
-    g.add(shell(LEN, RAD, M, { color: dark ? 0x4a4e52 : 0xdde3e6 }));
+    g.add(shell(LEN, RAD, M, { color: dark ? 0x4a4e52 : 0xdde3e6, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.82], [BIG, BIG, .82])]];
 
     /* Regale mit Tabletts — Gang in der Mitte, Regale an beiden Wänden */
     const perSide = Math.ceil(n / 2);
@@ -617,10 +693,10 @@ const ROOMS = {
       pipe.position.set(0, floorY + levels * .95 + .22, side * 1.35);
       g.add(pipe);
     }
-    /* Bedienkonsole */
+    /* Bedienkonsole seitlich am Eingang — die Stirnwand bleibt für die Luke frei */
     const con = screen(.72, .42, dark ? .78 : .42);
-    con.position.set(-LEN / 2 + .35, -.3, 0);
-    con.rotation.y = Math.PI / 2;
+    con.position.set(-LEN / 2 + .6, -.3, -1.2);
+    con.rotation.y = Math.PI / 2 - .55;
     g.add(con);
     ctx.screens = [con];
 
@@ -634,15 +710,17 @@ const ROOMS = {
     aisle2.position.set(LEN * .3, -.9, 0);
     g.add(aisle2);
 
-    ctx.camera = { pos: new THREE.Vector3(LEN * .44, .42, .02), look: new THREE.Vector3(-LEN * .5, -.58, 0), fov: 64 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .42, .3, .02), look: new THREE.Vector3(LEN * .5, -.7, 0) };
     return g;
   },
 
   /* ══ VERTIKALFARM ══ */
-  tower(st, ctx, modId, g, slots) {
+  tower(st, ctx, modId, g, slots, ports = {}) {
     const M = mats();
     const RAD = 3.1, LEN = 8.5;
-    g.add(shell(LEN, RAD, M, { color: 0xc8d2d8 }));
+    g.add(shell(LEN, RAD, M, { color: 0xc8d2d8, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('x', [0, 0, 0], RAD - .5, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -1.15], [BIG, BIG, 1.15])]];
     ctx.anchors = [];
     const levels = 6;
     const perSide = Math.ceil(slots.length / 2);
@@ -673,14 +751,14 @@ const ROOMS = {
       }
     }
     const con = screen(1.0, .6, .75);
-    con.position.set(-LEN / 2 + .3, .4, 0);
-    con.rotation.y = Math.PI / 2;
+    con.position.set(-LEN / 2 + .7, .4, -1.55);
+    con.rotation.y = Math.PI / 2 - .55;
     g.add(con);
     ctx.screens = [con];
     g.add(makeStrip(LEN * .8, 0, RAD * .85, 0, 0xd8e4ff, .6));
     g.add(new THREE.HemisphereLight(0xb4cdf0, 0x33302a, 1.05));
     g.add(new THREE.AmbientLight(0x5f6b7d, .55));
-    ctx.camera = { pos: new THREE.Vector3(LEN * .44, .45, .02), look: new THREE.Vector3(-LEN * .5, -.15, 0), fov: 68 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .42, .45, .02), look: new THREE.Vector3(LEN * .5, -.3, 0) };
     return g;
   },
 
@@ -690,11 +768,18 @@ const ROOMS = {
     const R = 4.2;
     // Boden
     const ft = floorTexture(); ft.repeat.set(6, 6);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(R, 48),
-      new THREE.MeshStandardMaterial({ map: ft, color: 0x8e959c, roughness: .8, metalness: .3 }));
+    // Boden mit Luke in der Mitte — darunter liegt der Knoten
+    const floor = new THREE.Mesh(new THREE.RingGeometry(HATCH_R, R, 48, 2),
+      new THREE.MeshStandardMaterial({ map: ft, color: 0x8e959c, roughness: .8, metalness: .3, side: THREE.DoubleSide }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = -1.6;
     floor.receiveShadow = true;
     g.add(floor);
+    const hatchRing = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R + .05, .07, 10, 36), mats().metal);
+    hatchRing.rotation.x = Math.PI / 2; hatchRing.position.y = -1.57;
+    g.add(hatchRing);
+    ctx.dims = { outward: new THREE.Vector3(0, 1, 0), inDist: 1.6, outDist: R };
+    ctx.walk = [[sphR([0, -1.6, 0], R - .55), boxR([-BIG, -1.6 + .5, -BIG], [BIG, BIG, BIG])]];
+    ctx.profile = { fov: 72, earth: 1.1 };
     // Kuppelstreben
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: .3, metalness: .9 });
     for (let i = 0; i < 16; i++) {
@@ -740,25 +825,24 @@ const ROOMS = {
       g.add(t);
       ctx.anchors.push({ slot: slots[i], obj: t.userData.anchor, tray: t });
     }
-    // Sitzbank in der Mitte
-    const bench = new THREE.Mesh(new THREE.CylinderGeometry(.55, .6, .42, 24),
-      new THREE.MeshStandardMaterial({ color: 0x6a6a72, roughness: .7 }));
-    bench.position.y = -1.4;
-    g.add(bench);
 
     g.add(new THREE.HemisphereLight(0x9fc8ff, 0x3a3a30, .85));
     g.add(new THREE.AmbientLight(0x5a6878, .45));
-    ctx.camera = { pos: new THREE.Vector3(.5, .35, 3.15), look: new THREE.Vector3(-1.4, -.95, -.6), fov: 64 };
-    ctx.sunDirLocal = new THREE.Vector3(0, 1, 0);
+    ctx.camera = { pos: new THREE.Vector3(.4, .1, 2.6), look: new THREE.Vector3(-1.4, -1.0, -.6) };
     return g;
   },
 
   /* ══ LABOR ══ */
-  lab(st, ctx) {
+  lab(st, ctx, modId, ports = {}) {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 6.4, RAD = 2.3;
-    g.add(shell(LEN, RAD, M, { color: 0xe8ecef }));
+    g.add(shell(LEN, RAD, M, { color: 0xe8ecef, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [
+      [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.8], [BIG, BIG, .8])],
+      [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -.3, -BIG], [BIG, BIG, BIG])],
+    ];
 
     const benchMat = new THREE.MeshStandardMaterial({ color: 0xd4d8db, roughness: .35, metalness: .4 });
     for (const side of [-1, 1]) {
@@ -827,16 +911,21 @@ const ROOMS = {
     const labFill = new THREE.PointLight(0xe0ecff, 2.0, LEN * 1.4, 2);
     labFill.position.set(0, -.3, 0);
     g.add(labFill);
-    ctx.camera = { pos: new THREE.Vector3(-LEN * .44, .38, .05), look: new THREE.Vector3(LEN * .5, -.55, .05), fov: 64 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .42, .3, .05), look: new THREE.Vector3(LEN * .5, -.6, .05) };
     return g;
   },
 
   /* ══ TECHNIK ══ */
-  systems(st, ctx) {
+  systems(st, ctx, modId, ports = {}) {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 6.0, RAD = 2.4;
-    g.add(shell(LEN, RAD, M, { color: 0xb4bcc2 }));
+    g.add(shell(LEN, RAD, M, { color: 0xb4bcc2, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [
+      [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.9], [BIG, BIG, .8])],
+      [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, .35, -1.3], [BIG, BIG, 1.3])],
+    ];
 
     // Wassertanks
     const tankMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ea, roughness: .35, metalness: .5 });
@@ -893,7 +982,7 @@ const ROOMS = {
     const sysFill = new THREE.PointLight(0xcfe0f4, 2.0, LEN * 1.4, 2);
     sysFill.position.set(0, -.3, 0);
     g.add(sysFill);
-    ctx.camera = { pos: new THREE.Vector3(-LEN * .46, .34, .55), look: new THREE.Vector3(LEN * .5, -.52, -.1), fov: 64 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .4, .3, .3), look: new THREE.Vector3(LEN * .5, -.6, -.1) };
     return g;
   },
 
@@ -902,19 +991,38 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 5.6, RAD = 2.2;
-    g.add(shell(LEN, RAD, M, { color: 0xc6ccd0, axis: 'z' }));
+    g.add(shell(LEN, RAD, M, { color: 0xc6ccd0, axis: 'z', ends: { neg: 'open', pos: 'port' } }));
+    /* Stirnwand mit Bullauge: durch die Luke sieht man hinaus ins All */
+    const PORT_Y = -.5, PORT_R = .3;
+    const endShape = new THREE.Shape(); endShape.absarc(0, 0, RAD, 0, TAU, false);
+    const endHole = new THREE.Path(); endHole.absarc(0, PORT_Y, PORT_R, 0, TAU, true); endShape.holes.push(endHole);
+    const endWall = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40),
+      new THREE.MeshStandardMaterial({ color: 0xc3c9cd, roughness: .8, metalness: .15, side: THREE.DoubleSide }));
+    endWall.position.z = -LEN / 2;
+    g.add(endWall);
+    const outer = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40), M.hull);
+    outer.position.z = -LEN / 2 - .1; outer.rotation.y = Math.PI; outer.scale.x = -1;
+    g.add(outer);
+    ctx.dims = { outward: new THREE.Vector3(0, 0, -1), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('z', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-.85, -RAD * .72 + .5, -BIG], [.85, BIG, BIG])]];
+    ctx.profile = { earth: .35 };
 
     // Luke mit Fenster zum All
     const hatch = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.TorusGeometry(.95, .14, 12, 40), M.metal);
     hatch.add(ring);
-    const door = new THREE.Mesh(new THREE.CylinderGeometry(.92, .92, .12, 36), M.hullDark);
-    door.rotation.x = Math.PI / 2;
+    const doorShape = new THREE.Shape(); doorShape.absarc(0, 0, .92, 0, TAU, false);
+    const doorHole = new THREE.Path(); doorHole.absarc(0, 0, PORT_R, 0, TAU, true); doorShape.holes.push(doorHole);
+    const door = new THREE.Mesh(new THREE.ExtrudeGeometry(doorShape, { depth: .12, bevelEnabled: false, curveSegments: 28 }), M.hullDark);
+    door.position.z = -.06;
     hatch.add(door);
-    const port = new THREE.Mesh(new THREE.CircleGeometry(.3, 28), new THREE.MeshPhysicalMaterial({
-      color: 0x0a1018, transmission: .0, transparent: true, opacity: .1, roughness: .02, clearcoat: 1, depthWrite: false,
+    const portRim = new THREE.Mesh(new THREE.TorusGeometry(PORT_R + .02, .035, 8, 28), M.metal);
+    portRim.position.z = .07;
+    hatch.add(portRim);
+    const port = new THREE.Mesh(new THREE.CircleGeometry(PORT_R, 28), new THREE.MeshBasicMaterial({
+      color: 0x9fc4e8, transparent: true, opacity: .04, depthWrite: false, blending: THREE.AdditiveBlending,
     }));
-    port.position.z = -.07;
+    port.position.z = -.04;
     hatch.add(port);
     for (let i = 0; i < 8; i++) {
       const b = new THREE.Mesh(new THREE.BoxGeometry(.1, .16, .1), M.metal);
@@ -922,7 +1030,7 @@ const ROOMS = {
       b.position.set(Math.cos(a) * .95, Math.sin(a) * .95, -.1);
       hatch.add(b);
     }
-    hatch.position.set(0, -.5, -LEN / 2 + .1);
+    hatch.position.set(0, PORT_Y, -LEN / 2 + .1);
     g.add(hatch);
     ctx.hatchPort = port;
     ctx.window = { mesh: port, dir: new THREE.Vector3(0, -0.5, -1).normalize(), small: true };
@@ -964,7 +1072,7 @@ const ROOMS = {
     const cgFill = new THREE.PointLight(0xffe4bc, 1.8, LEN * 1.3, 2);
     cgFill.position.set(0, -.4, .4);
     g.add(cgFill);
-    ctx.camera = { pos: new THREE.Vector3(.55, .42, 2.35), look: new THREE.Vector3(-.15, -.45, -2.7), fov: 62 };
+    ctx.camera = { pos: new THREE.Vector3(.3, .3, 2.1), look: new THREE.Vector3(-.15, -.5, -2.7) };
     return g;
   },
 };
@@ -975,61 +1083,576 @@ function makeStrip(len, x, y, z, color, intensity) {
   return s;
 }
 
+/* ───────────────────────── Knoten und Durchstiege ───────────────────────── */
+
+const NODE_H = 2.0;         // halbe Kantenlänge des Knotens
+const GAP = 1.0;            // Länge eines Durchstiegs
+const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+/* Ketten vom Knoten aus. Die Reihenfolge ist die Reihenfolge der Montage. */
+const CHAINS = [
+  { key: '+x', dir: new THREE.Vector3(1, 0, 0), ids: ['grow_a', 'lab', 'vertical'] },
+  { key: '-x', dir: new THREE.Vector3(-1, 0, 0), ids: ['systems', 'cargo'] },
+  { key: '+z', dir: new THREE.Vector3(0, 0, 1), ids: ['lounge'] },
+  { key: '-z', dir: new THREE.Vector3(0, 0, -1), ids: ['hydro', 'mycology'] },
+  { key: '-y', dir: new THREE.Vector3(0, -1, 0), ids: ['cupola'] },
+  { key: '+y', dir: new THREE.Vector3(0, 1, 0), ids: ['dome'] },
+];
+
+/** Dreht die Auswärtsachse eines Raums auf die Kettenrichtung. Waagerechte
+ *  Räume nur um die Hochachse, damit der Boden unten bleibt. */
+function orientation(outward, dir) {
+  if (Math.abs(dir.y) > .5 && Math.abs(outward.y) < .5) return new THREE.Quaternion().setFromUnitVectors(outward, dir);
+  const a = Math.atan2(outward.x, outward.z), b = Math.atan2(dir.x, dir.z);
+  return new THREE.Quaternion().setFromAxisAngle(UP, b - a);
+}
+
+function buildRoom(id, st, ctx, ports) {
+  const def = MOD_BY_ID[id];
+  if (id === 'lounge') return ROOMS.lounge(st, ctx, id, ports);
+  if (id === 'cupola') return ROOMS.cupola(st, ctx, id, ports);
+  if (id === 'lab') return ROOMS.lab(st, ctx, id, ports);
+  if (id === 'systems') return ROOMS.systems(st, ctx, id, ports);
+  if (id === 'cargo') return ROOMS.cargo(st, ctx, id, ports);
+  if (def && (def.slots || st.modules[id]?.slots)) return ROOMS.grow(st, ctx, id, ports);
+  return ROOMS.lab(st, ctx, id, ports);
+}
+
+/** Kurzer Verbindungstunnel entlang +Y. */
+function tunnel(len, M) {
+  const g = new THREE.Group();
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(HATCH_R + .02, HATCH_R + .02, len + .12, 32, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xb4bbc2, roughness: .5, metalness: .5, side: THREE.BackSide }));
+  g.add(tube);
+  const skin = new THREE.Mesh(new THREE.CylinderGeometry(HATCH_R + .12, HATCH_R + .12, len, 24, 1, true), M.hullDark);
+  g.add(skin);
+  for (const y of [-len / 2 + .12, 0, len / 2 - .12]) {
+    const r = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R - .01, .045, 8, 32), M.metal);
+    r.rotation.x = Math.PI / 2; r.position.y = y;
+    g.add(r);
+  }
+  // Handlauf längs durch den Durchstieg
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(.022, .022, len * .8, 8), M.metal);
+  rail.position.set(HATCH_R - .12, 0, 0);
+  g.add(rail);
+  return g;
+}
+
+/** Helle Wandpaneele mit Fugen, Nieten und Beschriftungsfeldern. */
+let _panelTex = null;
+function panelTexture() {
+  if (_panelTex) return _panelTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const x = c.getContext('2d');
+  x.fillStyle = '#dcdedb'; x.fillRect(0, 0, 512, 512);
+  const img = x.getImageData(0, 0, 512, 512);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - .5) * 6;
+    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+  }
+  x.putImageData(img, 0, 0);
+  const cells = [[0, 0, 256, 256], [256, 0, 256, 128], [256, 128, 256, 128], [0, 256, 128, 256], [128, 256, 384, 256]];
+  for (const [px, py, w, h] of cells) {
+    x.strokeStyle = 'rgba(80,86,92,.55)'; x.lineWidth = 3; x.strokeRect(px + 2, py + 2, w - 4, h - 4);
+    x.strokeStyle = 'rgba(255,255,255,.5)'; x.lineWidth = 1; x.strokeRect(px + 5, py + 5, w - 10, h - 10);
+    x.fillStyle = 'rgba(90,96,102,.5)';
+    for (const [rx, ry] of [[px + 12, py + 12], [px + w - 12, py + 12], [px + 12, py + h - 12], [px + w - 12, py + h - 12]]) {
+      x.beginPath(); x.arc(rx, ry, 3, 0, 7); x.fill();
+    }
+  }
+  // Klettstreifen und Beschriftungsfelder, wie an den ISS-Wänden
+  x.fillStyle = 'rgba(120,124,128,.35)'; x.fillRect(30, 180, 90, 14); x.fillRect(300, 60, 120, 10); x.fillRect(170, 420, 140, 12);
+  x.fillStyle = 'rgba(60,110,170,.55)'; x.fillRect(290, 180, 60, 18);
+  x.fillStyle = 'rgba(210,160,50,.6)'; x.fillRect(40, 320, 50, 8);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return (_panelTex = t);
+}
+
+/** Der Knoten: ein Würfel mit bis zu sechs Luken, wie Unity auf der ISS. */
+function buildNode(ports, M) {
+  const g = new THREE.Group();
+  const S = NODE_H;
+  const tex = panelTexture();
+  tex.repeat.set(.5, .5);
+  const wallMat = new THREE.MeshStandardMaterial({ map: tex, color: 0xffffff, roughness: .7, metalness: .08, side: THREE.DoubleSide });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0x5e7aa0, roughness: .5, metalness: .35 });
+  const faces = [
+    ['+x', [S, 0, 0], [0, -Math.PI / 2, 0]], ['-x', [-S, 0, 0], [0, Math.PI / 2, 0]],
+    ['+z', [0, 0, S], [0, Math.PI, 0]], ['-z', [0, 0, -S], [0, 0, 0]],
+    ['+y', [0, S, 0], [Math.PI / 2, 0, 0]], ['-y', [0, -S, 0], [-Math.PI / 2, 0, 0]],
+  ];
+  for (const [key, pos, rot] of faces) {
+    const shape = roundedRectShape(2 * S, 2 * S, .05);
+    const open = ports.has(key);
+    if (open) { const h = new THREE.Path(); h.absarc(0, 0, HATCH_R, 0, TAU, true); shape.holes.push(h); }
+    const wall = new THREE.Mesh(new THREE.ShapeGeometry(shape, 32), wallMat);
+    wall.position.fromArray(pos); wall.rotation.fromArray(rot);
+    g.add(wall);
+    const inward = new THREE.Vector3().fromArray(pos).normalize().multiplyScalar(-1);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R + .05, .07, 10, 40), M.metal);
+    ring.position.fromArray(pos).addScaledVector(inward, .04); ring.rotation.fromArray(rot);
+    g.add(ring);
+    if (!open) {
+      // geschlossene Luke: hier kann später ein Modul andocken
+      const door = new THREE.Mesh(new THREE.CircleGeometry(HATCH_R, 32), doorMat);
+      door.position.fromArray(pos).addScaledVector(inward, .02); door.rotation.fromArray(rot);
+      g.add(door);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(.9, .07, .07), M.metal);
+      bar.position.copy(door.position).addScaledVector(inward, .05); bar.rotation.fromArray(rot);
+      g.add(bar);
+    }
+    // Handläufe beiderseits jeder Luke
+    for (const sgn of [-1, 1]) {
+      const h = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, .9, 8), M.metal);
+      const local = new THREE.Vector3(sgn * (HATCH_R + .35), 0, .09);
+      h.position.copy(local.applyEuler(new THREE.Euler(...rot))).add(new THREE.Vector3().fromArray(pos));
+      h.rotation.fromArray(rot);
+      h.rotateX(Math.PI / 2); h.rotateX(-Math.PI / 2);
+      g.add(h);
+    }
+  }
+  // Kanten
+  for (const ax of ['x', 'y', 'z']) for (const a of [-1, 1]) for (const b of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, 2 * S, 10), M.metal);
+    if (ax === 'x') { e.rotation.z = Math.PI / 2; e.position.set(0, a * (S - .06), b * (S - .06)); }
+    else if (ax === 'y') { e.position.set(a * (S - .06), 0, b * (S - .06)); }
+    else { e.rotation.x = Math.PI / 2; e.position.set(a * (S - .06), b * (S - .06), 0); }
+    g.add(e);
+  }
+  // vier Leuchtbänder unter der Decke
+  for (const [x, z, ry] of [[0, S - .25, 0], [0, -S + .25, 0], [S - .25, 0, Math.PI / 2], [-S + .25, 0, Math.PI / 2]]) {
+    const l = lightStrip(2.4, 0xe4ecff, .45);
+    l.position.set(x, S - .12, z); l.rotation.y = ry;
+    g.add(l);
+  }
+  return g;
+}
+
+/* ───────────────────────── Zusammenfassen ─────────────────────────
+   Jede Spante, jeder Handlauf, jeder Pfosten war ein eigenes Objekt — über
+   die ganze Station tausend Zeichenaufrufe je Bild, und das kostet in WebGL
+   vor allem Prozessorzeit. Was sich nie bewegt, wird je Raum und Material zu
+   einem einzigen Netz verschmolzen. Tabletts (anklickbar), Pflanzen,
+   Bildschirme und Lampen bleiben eigenständig. */
+function mergeStatic(holder) {
+  holder.updateMatrixWorld(true);
+  const inv = holder.matrixWorld.clone().invert();
+  const groups = new Map();
+  const keep = o => {
+    for (let p = o; p && p !== holder; p = p.parent) {
+      const u = p.userData;
+      if (u.slotId || u.draw || u.lamp || u.anchor || u.disc || u.dynamic) return true;
+    }
+    return false;
+  };
+  holder.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh || Array.isArray(o.material) || o.material.transparent || o.material.wireframe) return;
+    if (keep(o) || !o.geometry.attributes.position) return;
+    const key = o.material.uuid;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  });
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const geos = [];
+    for (const m of list) {
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+      g.morphAttributes = {};
+      geos.push(g);
+    }
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, list[0].material);
+    mesh.name = 'merged';
+    holder.add(mesh);
+    for (const m of list) { m.parent.remove(m); m.geometry.dispose(); }
+  }
+}
+
+/* ───────────────────────── Abstandsfeld ─────────────────────────
+   Begehbar ist die Vereinigung aller Bereiche; jeder Bereich ist der Schnitt
+   einfacher Körper. Negativ = innen. Nach jedem Schritt wird das Auge entlang
+   des Gradienten zurück ins Innere geschoben. */
+const _v = new THREE.Vector3();
+function sdPart(p, part) {
+  if (part.type === 'cyl') {
+    const c = part.c;
+    const x = p.x - c[0], y = p.y - c[1], z = p.z - c[2];
+    const [a, r1, r2] = part.axis === 'x' ? [x, y, z] : part.axis === 'y' ? [y, x, z] : [z, x, y];
+    const dr = Math.hypot(r1, r2) - part.r, dh = Math.abs(a) - part.h;
+    return Math.min(Math.max(dr, dh), 0) + Math.hypot(Math.max(dr, 0), Math.max(dh, 0));
+  }
+  if (part.type === 'box') {
+    const cx = (part.min[0] + part.max[0]) / 2, cy = (part.min[1] + part.max[1]) / 2, cz = (part.min[2] + part.max[2]) / 2;
+    const qx = Math.abs(p.x - cx) - (part.max[0] - part.min[0]) / 2;
+    const qy = Math.abs(p.y - cy) - (part.max[1] - part.min[1]) / 2;
+    const qz = Math.abs(p.z - cz) - (part.max[2] - part.min[2]) / 2;
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0);
+  }
+  const c = part.c;
+  return Math.hypot(p.x - c[0], p.y - c[1], p.z - c[2]) - part.r;
+}
+function sdRegion(p, reg) {
+  _v.copy(p).applyMatrix4(reg.inv);
+  let d = -Infinity;
+  for (const part of reg.parts) d = Math.max(d, sdPart(_v, part));
+  return d;
+}
+
 /* ───────────────────────── Controller ───────────────────────── */
+
+const POOL = 10;             // gleichzeitig aktive Punktlichter
+const SPEED = 2.1;           // m/s beim Schweben
+const EYE = new THREE.Vector3();
+
+const WARM_WHITE = new THREE.Color(0xf2ece4);
+const WARM_GREY = new THREE.Color(0x8a8680);
+const NODE_PROFILE = { hemiSky: new THREE.Color(0xc4d4e8), hemiGround: new THREE.Color(0x3a3630), hemiI: 1.05, ambColor: new THREE.Color(0x6a7688), ambI: .6, earth: 0, fov: 70 };
 
 export class Interior {
   constructor(sky) {
     this.sky = sky;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.05, 200);
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.04, 300);
+    this.camera.rotation.order = 'YXZ';
     this.root = new THREE.Group();
     this.scene.add(this.root);
-    this.sun = new THREE.DirectionalLight(0xfff2e0, 0);
-    this.sun.castShadow = false;
-    this.scene.add(this.sun, this.sun.target);
+
+    /* Umgebungsspiegelung: ohne sie haben Metallteile nichts zu spiegeln
+       und erscheinen schwarz. Ein weicher, heller Raum reicht dafür. */
+    if (sky?.renderer) {
+      const pmrem = new THREE.PMREMGenerator(sky.renderer);
+      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environmentIntensity = .38;
+      pmrem.dispose();
+    }
+
+    /* Licht, das der ganzen Station gehört */
+    this.hemi = new THREE.HemisphereLight(0xb4cdf0, 0x33302a, 1.0);
+    this.amb = new THREE.AmbientLight(0x5f6b7d, .5);
+    this.earthLight = new THREE.DirectionalLight(0xbcd6f5, 0);        // Erdschein von unten
+    this.sun = new THREE.DirectionalLight(0xfff4e6, 0);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = -9; sc.right = 9; sc.top = 9; sc.bottom = -9; sc.near = .5; sc.far = 48;
+    sc.updateProjectionMatrix();
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.035;
+    this.scene.add(this.hemi, this.amb, this.earthLight, this.earthLight.target, this.sun, this.sun.target);
+    this.pool = [];
+    for (let i = 0; i < POOL; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 5, 2);
+      l.userData = { src: null, fade: 0 };
+      this.pool.push(l);
+      this.scene.add(l);
+    }
+
     this.raycaster = new THREE.Raycaster();
-    this.pointer = new THREE.Vector2();
-    this.parallax = new THREE.Vector2();
-    this.ctx = {};
     this.plants = new Map();
-    this.roomId = null;
-    this.baseCam = new THREE.Vector3();
-    this.lookAt = new THREE.Vector3();
+    this.pos = new THREE.Vector3(0, 0, 0);
+    this.vel = new THREE.Vector3();
+    this.yaw = 0; this.pitch = 0;
+    this.keys = new Set();
+    this.active = false;
+    this.room = 'node';
+    this.sig = null;
+    this.ctx = {};
+    this._fov = 70;
+    this._screenT = 0;
+    this._clearBuild();
   }
 
-  setRoom(id, st) {
+  _clearBuild() {
+    this.anchors = []; this.screens = []; this.regions = []; this.sources = []; this.tunnels = [];
+    this.spawns = {}; this.profiles = { node: NODE_PROFILE }; this.spinners = []; this.dynamic = [];
+    for (const l of this.pool || []) { l.userData.src = null; l.userData.fade = 0; l.intensity = 0; }
+  }
+
+  /** Was sich ändern muss, damit die Station neu gebaut wird. */
+  static signature(st) {
+    const mods = Object.entries(st.modules).filter(([, m]) => m.built).map(([id]) => id + ':' + st.slots.filter(s => s.mod === id).length);
+    return mods.sort().join(',') + '|' + [...st.comfort].sort().join(',');
+  }
+
+  /** Baut die Station nur, wenn sich am Aufbau etwas geändert hat. */
+  ensure(st) {
+    const sig = Interior.signature(st);
+    if (sig !== this.sig) this.build(st);
+  }
+
+  build(st) {
     while (this.root.children.length) {
       const c = this.root.children.pop();
       c.traverse(o => { if (o.geometry) o.geometry.dispose(); });
     }
     this.plants.clear();
-    this.ctx = { anchors: [], screens: [] };
-    this.roomId = id;
+    this._clearBuild();
+    const M = mats();
+    const built = id => !!st.modules[id]?.built;
+    const nodePorts = new Set();
 
-    let g;
-    const def = MOD_BY_ID[id];
-    if (id === 'lounge') g = ROOMS.lounge(st, this.ctx);
-    else if (id === 'cupola') g = ROOMS.cupola(st, this.ctx);
-    else if (id === 'lab') g = ROOMS.lab(st, this.ctx);
-    else if (id === 'systems') g = ROOMS.systems(st, this.ctx);
-    else if (id === 'cargo') g = ROOMS.cargo(st, this.ctx);
-    else if (def && (def.slots || st.modules[id]?.slots)) g = ROOMS.grow(st, this.ctx, id);
-    else g = ROOMS.lab(st, this.ctx);
-    this.root.add(g);
+    for (const ch of CHAINS) {
+      const ids = ch.ids.filter(built);
+      if (!ids.length) continue;
+      nodePorts.add(ch.key);
+      let cursor = NODE_H + GAP;
+      this._addTunnel(ch.dir, NODE_H, cursor, M);
+      ids.forEach((id, i) => {
+        const ctx = { anchors: [], screens: [] };
+        const ports = { far: i < ids.length - 1 };
+        const g = buildRoom(id, st, ctx, ports);
+        const d = ctx.dims;
+        const holder = new THREE.Group();
+        holder.name = 'room:' + id;
+        holder.quaternion.copy(orientation(d.outward, ch.dir));
+        holder.position.copy(ch.dir).multiplyScalar(cursor + d.inDist);
+        holder.add(g);
+        this.root.add(holder);
+        holder.updateMatrixWorld(true);
+        this._collect(id, holder, ctx);
+        mergeStatic(holder);
+        cursor += d.inDist + d.outDist + GAP;
+        if (ports.far) this._addTunnel(ch.dir, cursor - GAP, cursor, M);
+      });
+    }
 
-    const c = this.ctx.camera;
-    this.camera.fov = c.fov;
-    this.camera.position.copy(c.pos);
-    this.baseCam.copy(c.pos);
-    this.lookAt.copy(c.look);
-    this.camera.lookAt(c.look);
-    this.camera.updateProjectionMatrix();
+    const node = buildNode(nodePorts, M);
+    node.name = 'room:node';
+    this.root.add(node);
+    node.updateMatrixWorld(true);
+    const NB = NODE_H - .32;
+    this._collect('node', node, {
+      walk: [[boxR([-NB, -NB, -NB], [NB, NB, NB])]],
+      camera: { pos: new THREE.Vector3(-1.2, .5, 1.2), look: new THREE.Vector3(3, -.3, -2) },
+    });
+    mergeStatic(node);
+
+    /* Alles wirft und empfängt Schatten — nur Glas nicht, sonst fiele kein
+       Sonnenlicht durch die Fenster */
+    this.root.traverse(o => {
+      if (!o.isMesh) return;
+      o.receiveShadow = true;
+      o.castShadow = !o.material.transparent && !o.material.wireframe;
+    });
     this.syncPlants(st, true);
+    this.sig = Interior.signature(st);
+  }
+
+  _addTunnel(dir, from, to, M) {
+    const len = to - from;
+    const t = tunnel(len, M);
+    t.position.copy(dir).multiplyScalar((from + to) / 2);
+    t.quaternion.setFromUnitVectors(UP, dir);
+    this.root.add(t);
+    t.updateMatrixWorld(true);
+    mergeStatic(t);
+    this.regions.push({ id: null, inv: t.matrixWorld.clone().invert(), parts: [cylR('y', [0, 0, 0], HATCH_R - .3, len / 2 + .75)] });
+    this.tunnels.push({ center: t.position.clone(), dir: dir.clone(), half: len / 2 });
+  }
+
+  /* Wer auf eine Luke zuschwebt, wird sanft auf ihre Achse gezogen — sonst
+     bleibt man schräg am Rand hängen und rutscht an der Wand entlang. */
+  _hatchAssist(dt) {
+    for (const tu of this.tunnels) {
+      const rel = _g.copy(this.pos).sub(tu.center);
+      const a = rel.dot(tu.dir);
+      if (Math.abs(a) > tu.half + 1.3) continue;
+      const lat = rel.addScaledVector(tu.dir, -a);            // seitlicher Versatz zur Achse
+      const ld = lat.length();
+      if (ld > 1.35 || ld < 1e-4) continue;
+      const toward = -Math.sign(a) * this.vel.dot(tu.dir);   // Geschwindigkeit in den Tunnel hinein
+      const inside = Math.abs(a) < tu.half + .2;
+      if (!inside && toward < .15) continue;
+      const k = Math.min(1, Math.max(toward, inside ? .4 : 0)) * 5.0 * dt;
+      this.pos.addScaledVector(lat, -Math.min(k, .5) * (ld > .08 ? 1 : 0));
+    }
+  }
+
+  /** Übernimmt Pflanzplätze, Bildschirme, Lichter und Laufbereiche eines Raums. */
+  _collect(id, holder, ctx) {
+    const inv = holder.matrixWorld.clone().invert();
+    for (const parts of ctx.walk || []) this.regions.push({ id, inv, parts });
+    for (const a of ctx.anchors || []) {
+      // auch die Gruppe markieren — sonst trifft ein Klick aufs Blatt ins Leere
+      a.tray.userData.slotId = a.slot.id;
+      a.obj.userData.slotId = a.slot.id;
+      this.anchors.push({ ...a, room: id });
+    }
+    for (const s of ctx.screens || []) this.screens.push({ mesh: s, pos: s.getWorldPosition(new THREE.Vector3()) });
+    if (ctx.record) this.spinners.push(ctx.record);
+    if (ctx.winFill) this.dynamic.push({ light: ctx.winFill, kind: 'window' });
+    if (ctx.camera) {
+      const pos = holder.localToWorld(ctx.camera.pos.clone());
+      const look = holder.localToWorld(ctx.camera.look.clone());
+      this.spawns[id] = { pos, look };
+    }
+    /* Raumlicht herauslösen: Punktlichter kommen in den gemeinsamen Pool,
+       Grundlicht wird zum Profil, zwischen dem beim Durchqueren überblendet wird. */
+    const profile = { ...NODE_PROFILE, hemiSky: NODE_PROFILE.hemiSky.clone(), hemiGround: NODE_PROFILE.hemiGround.clone(), ambColor: NODE_PROFILE.ambColor.clone(), earth: 0, ...(ctx.profile || {}) };
+    let hemiSeen = false, ambSeen = false;
+    const drop = [];
+    holder.traverse(o => {
+      if (!o.isLight) return;
+      if (o.isPointLight) {
+        this.sources.push({ light: o, pos: o.getWorldPosition(new THREE.Vector3()), score: 0 });
+      } else if (o.isHemisphereLight && !hemiSeen) {
+        hemiSeen = true; profile.hemiSky = o.color.clone(); profile.hemiGround = o.groundColor.clone(); profile.hemiI = o.intensity;
+      } else if (o.isAmbientLight && !ambSeen) {
+        ambSeen = true; profile.ambColor = o.color.clone(); profile.ambI = o.intensity;
+      } else if (o.isDirectionalLight) {
+        profile.earth = Math.max(profile.earth, o.intensity);
+      }
+      drop.push(o);
+    });
+    for (const o of drop) { o.parent.remove(o); if (o.target) o.target.parent?.remove(o.target); }
+    /* Die Räume waren auf eine Sonne ohne Schatten abgestimmt, die überall
+       warm hineinschien. Ohne sie kippt das Grundlicht ins Blaue — also
+       neutraler mischen. */
+    profile.hemiSky.lerp(WARM_WHITE, .5);
+    profile.ambColor.lerp(WARM_GREY, .45);
+    if (id !== 'node' || !this.profiles.node.custom) this.profiles[id] = profile;
+  }
+
+  /* ── Bewegung ── */
+  attachControls(dom, { onInteract } = {}) {
+    if (this._controls) return;
+    this._controls = true;
+    this.onInteract = onInteract;
+    const pointers = new Map();
+    let pinch = 0, lastTap = 0;
+    dom.addEventListener('pointerdown', e => {
+      if (!this.active) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); }
+      if (e.pointerType === 'touch') {
+        const now = performance.now();
+        if (now - lastTap < 320 && pointers.size === 1) this.glideTo(e.clientX, e.clientY);
+        lastTap = now;
+      }
+    });
+    dom.addEventListener('pointermove', e => {
+      if (!this.active || !pointers.has(e.pointerId)) return;
+      const p = pointers.get(e.pointerId);
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pointers.size === 1) {
+        const k = e.pointerType === 'touch' ? 0.0048 : 0.0036;
+        this.yaw -= dx * k;
+        this.pitch = clamp(this.pitch - dy * k, -1.45, 1.45);
+        this.glide = null;
+      } else if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        this.vel.addScaledVector(this.forward(new THREE.Vector3()), (d - pinch) * 0.02);
+        pinch = d;
+      }
+    });
+    const up = e => { pointers.delete(e.pointerId); };
+    dom.addEventListener('pointerup', up);
+    dom.addEventListener('pointercancel', up);
+    dom.addEventListener('pointerleave', up);
+    dom.addEventListener('dblclick', e => { if (this.active) this.glideTo(e.clientX, e.clientY); });
+    dom.addEventListener('wheel', e => {
+      if (!this.active) return;
+      e.preventDefault();
+      this.vel.addScaledVector(this.forward(new THREE.Vector3()), -e.deltaY * 0.0035);
+      this.glide = null;
+    }, { passive: false });
+    const MOVE = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyQ']);
+    window.addEventListener('keydown', e => {
+      if (!this.active || e.target.matches?.('input,textarea,select') || e.metaKey || e.ctrlKey) return;
+      if (MOVE.has(e.code)) { this.keys.add(e.code); this.glide = null; e.preventDefault(); }
+      else if (e.code === 'KeyE') this.onInteract?.();
+    });
+    window.addEventListener('keyup', e => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  forward(out) {
+    const cp = Math.cos(this.pitch);
+    return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+  }
+
+  /** Doppelklick: dorthin schweben, wo man hinzeigt. */
+  glideTo(cx, cy) {
+    const nx = (cx / innerWidth) * 2 - 1, ny = -(cy / innerHeight) * 2 + 1;
+    this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
+    this.raycaster.far = 40;
+    const hit = this.raycaster.intersectObjects(this.root.children, true).find(h => !h.object.material?.transparent);
+    if (!hit) return;
+    const dir = hit.point.clone().sub(this.camera.position);
+    const len = dir.length();
+    this.glide = this.camera.position.clone().addScaledVector(dir.normalize(), Math.max(0, len - .9));
+  }
+
+  /** Springt an den Aussichtspunkt eines Raums. */
+  teleport(id) {
+    const sp = this.spawns[id] || this.spawns.node;
+    if (!sp) return;
+    this.pos.copy(sp.pos);
+    this.vel.set(0, 0, 0);
+    this.glide = null;
+    const d = sp.look.clone().sub(sp.pos).normalize();
+    this.yaw = Math.atan2(-d.x, -d.z);
+    this.pitch = Math.asin(clamp(d.y, -1, 1));
+    this.collide(this.pos);
+    this.room = id;
+    const pr = this.profiles[id] || NODE_PROFILE;
+    this._snapLight = true;
+    this._snapShadow = true;
+    this._fov = pr.fov || 70;
+  }
+
+  /** Abstand zur nächsten Wand, negativ = innen. */
+  sdf(p) {
+    let d = Infinity;
+    for (const r of this.regions) d = Math.min(d, sdRegion(p, r));
+    return d;
+  }
+
+  collide(p) {
+    for (let it = 0; it < 3; it++) {
+      const d = this.sdf(p);
+      if (d <= 0) return;
+      const e = .004;
+      const g = new THREE.Vector3(
+        this.sdf(_g.set(p.x + e, p.y, p.z)) - this.sdf(_g.set(p.x - e, p.y, p.z)),
+        this.sdf(_g.set(p.x, p.y + e, p.z)) - this.sdf(_g.set(p.x, p.y - e, p.z)),
+        this.sdf(_g.set(p.x, p.y, p.z + e)) - this.sdf(_g.set(p.x, p.y, p.z - e)),
+      );
+      if (g.lengthSq() < 1e-12) return;
+      g.normalize();
+      p.addScaledVector(g, -(d + .002));
+      const vn = this.vel.dot(g);
+      if (vn > 0) this.vel.addScaledVector(g, -vn);
+    }
+  }
+
+  /** In welchem Raum steht das Auge? */
+  whichRoom(p) {
+    let best = null, bd = Infinity;
+    for (const r of this.regions) {
+      if (!r.id) continue;
+      const d = sdRegion(p, r);
+      if (d < bd) { bd = d; best = r.id; }
+    }
+    return bd < .25 ? best : this.room;
   }
 
   /** Pflanzenmodelle anlegen/erneuern. */
   syncPlants(st, force = false) {
-    for (const a of this.ctx.anchors || []) {
+    for (const a of this.anchors) {
       const s = st.slots.find(x => x.id === a.slot.id) || a.slot;
       a.slot = s;
       const key = s.id;
@@ -1038,14 +1661,6 @@ export class Interior {
       const bucket = Math.floor(s.prog * 14);
       const sig = `${s.plant}|${stageIdx}|${bucket}|${s.dead ? 1 : 0}|${Math.round(s.health * 4)}`;
       const cur = this.plants.get(key);
-      if (!force && cur && cur.sig === sig) continue;
-      if (cur) { a.obj.remove(cur.mesh); cur.mesh.traverse(o => o.geometry?.dispose()); }
-      if (!p) { this.plants.delete(key); continue; }
-      const mesh = buildPlant(p, s.prog, s.dead ? 0.05 : s.health, s.id, stageIdx);
-      const scale = a.tray ? 0.62 : 1;
-      mesh.scale.setScalar(scale);
-      a.obj.add(mesh);
-      this.plants.set(key, { sig, mesh, slot: s });
       // Lampe je nach Einstellung
       if (a.tray?.userData.lamp) {
         const lamp = st.lamps[s.mod];
@@ -1054,60 +1669,115 @@ export class Interior {
         a.tray.userData.lamp.material.emissiveIntensity = inten * 1.5;
         if (a.tray.userData.lampLight) a.tray.userData.lampLight.intensity = inten * 1.2;
       }
+      if (!force && cur && cur.sig === sig) continue;
+      if (cur) { a.obj.remove(cur.mesh); cur.mesh.traverse(o => o.geometry?.dispose()); }
+      if (!p) { this.plants.delete(key); continue; }
+      const mesh = buildPlant(p, s.prog, s.dead ? 0.05 : s.health, s.id, stageIdx);
+      mergeStatic(mesh);                         // Blätter je Material zu einem Netz
+      mesh.scale.setScalar(a.tray ? 0.62 : 1);
+      mesh.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      a.obj.add(mesh);
+      this.plants.set(key, { sig, mesh, slot: s });
     }
   }
 
-  setPointer(nx, ny) {
-    this.pointer.set(nx, ny);
-  }
-
-  /** Raycast auf Anbauplätze. */
+  /** Raycast auf Anbauplätze — nur was vorne liegt, nicht durch Wände. */
   pick(nx, ny) {
     this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
+    this.raycaster.far = 12;
     const hits = this.raycaster.intersectObjects(this.root.children, true);
-    for (const h of hits) {
-      let o = h.object;
-      while (o) {
-        if (o.userData?.slotId) return { slotId: o.userData.slotId };
-        o = o.parent;
-      }
+    const h = hits.find(x => !x.object.material?.transparent);
+    let o = h?.object;
+    while (o) {
+      if (o.userData?.slotId) return { slotId: o.userData.slotId };
+      o = o.parent;
     }
     return null;
   }
 
-  update(dt, t, st, solarInfo) {
-    // Sanfte Parallaxe
-    this.parallax.lerp(this.pointer, 1 - Math.pow(0.001, dt));
-    const px = this.parallax.x * 0.22, py = this.parallax.y * 0.14;
-    // Seitliche Parallaxe quer zur Blickrichtung, nicht entlang einer Weltachse
-    const fwd = this.lookAt.clone().sub(this.baseCam).normalize();
-    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
-    this.camera.position.copy(this.baseCam)
-      .addScaledVector(right, px)
-      .addScaledVector(new THREE.Vector3(0, 1, 0), py + Math.sin(t * 0.32) * 0.014);
-    this.camera.lookAt(this.lookAt);
-    this.camera.rotateZ(Math.sin(t * 0.19) * 0.005);   // sanfte Rolle um die Blickachse
-
-    // Sonnenlicht durch die Fenster
-    const lit = solarInfo?.sun ?? 1;
-    const dir = this.ctx.window?.dir;
-    if (dir) {
-      const swing = solarInfo ? (solarInfo.phase * TAU) : 0;
-      const d = dir.clone();
-      d.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.sin(swing) * 0.5);
-      d.applyAxisAngle(new THREE.Vector3(1, 0, 0), Math.cos(swing) * 0.22);
-      this.sun.position.copy(d.multiplyScalar(-12));
-      this.sun.target.position.set(0, -0.6, 0);
-      this.sun.intensity = lit * (this.ctx.window.small ? 1.0 : this.ctx.window.wide ? 2.2 : 3.4);
-      this.sun.color.setHSL(0.09, 0.25 * (1 - lit * 0.5) + 0.05, 0.62);
-    } else {
-      this.sun.intensity = 0;
+  /**
+   * @param {THREE.Vector3} sunDir Sonnenrichtung im Stationssystem
+   * @returns {string} Raum, in dem man gerade schwebt
+   */
+  update(dt, t, st, sol, sunDir, earthDir = DOWN) {
+    /* Schweben: Tasten beschleunigen, Dämpfung bremst sanft wieder ab */
+    const k = this.keys;
+    const f = this.forward(new THREE.Vector3());
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const wish = new THREE.Vector3()
+      .addScaledVector(f, (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0))
+      .addScaledVector(right, (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0))
+      .addScaledVector(UP, (k.has('Space') ? 1 : 0) - (k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyC') || k.has('KeyQ') ? 1 : 0));
+    const moving = wish.lengthSq() > 0;
+    if (moving) this.vel.addScaledVector(wish.normalize(), SPEED * 5.5 * dt);
+    if (this.glide) {
+      const to = this.glide.clone().sub(this.pos);
+      const dist = to.length();
+      if (dist < .08) this.glide = null;
+      else this.vel.lerp(to.normalize().multiplyScalar(Math.min(SPEED * 1.2, dist * 2.2)), 1 - Math.exp(-6 * dt));
     }
+    this.vel.multiplyScalar(Math.exp(-(moving || this.glide ? 2.6 : 3.4) * dt));
+    if (this.vel.length() > SPEED * 1.3) this.vel.setLength(SPEED * 1.3);
+    this.pos.addScaledVector(this.vel, dt);
+    this._hatchAssist(dt);
+    this.collide(this.pos);
 
-    if (this.ctx.winFill) this.ctx.winFill.intensity = 0.5 + 2.6 * lit;
-    if (this.ctx.earthGlow) this.ctx.earthGlow.intensity = 0.35 + 2.4 * lit;
-    for (const s of this.ctx.screens || []) s.userData.draw?.(t, this.ctx.screenLines || []);
-    if (this.ctx.record) this.ctx.record.rotation.y = t * 3.3;
+    const cam = this.camera;
+    cam.position.copy(this.pos);
+    cam.position.y += Math.sin(t * .55) * .012;            // ganz leichtes Treiben
+    cam.rotation.set(this.pitch, this.yaw, Math.sin(t * .19) * .004);
+    const room = this.whichRoom(this.pos);
+    this.room = room;
+
+    /* Grundlicht und Blickwinkel des Raums überblenden */
+    const pr = this.profiles[room] || NODE_PROFILE;
+    const a = this._snapLight ? 1 : 1 - Math.exp(-3 * dt);
+    this._snapLight = false;
+    this.hemi.color.lerp(pr.hemiSky, a); this.hemi.groundColor.lerp(pr.hemiGround, a);
+    this.hemi.intensity += (pr.hemiI - this.hemi.intensity) * a;
+    this.amb.color.lerp(pr.ambColor, a);
+    this.amb.intensity += (pr.ambI - this.amb.intensity) * a;
+    this._fov += ((pr.fov || 70) - this._fov) * (1 - Math.exp(-2 * dt));
+    if (Math.abs(cam.fov - this._fov) > .01) { cam.fov = this._fov; cam.updateProjectionMatrix(); }
+
+    /* Sonnenlicht durch die Fenster, mit Schatten. Die Schattenkamera folgt
+       dem Auge und rastet auf ihr Texelraster ein, sonst flimmern die Kanten. */
+    const lit = sol?.sun ?? 1;
+    const sd = sunDir || UP;
+    /* Ohne Schattenkarte (niedrige Qualitätsstufen) schiene die Sonne durch
+       jede Wand — dann bleibt sie draußen, und nur das Fensterlicht zählt. */
+    const shadows = !!this.sky?.renderer?.shadowMap.enabled;
+    this.sun.intensity = shadows ? 3.4 * lit : 0;
+    /* Die Sonne wandert 0,06° je Sekunde — die Schattenkarte muss nicht in
+       jedem Bild neu entstehen. Die Karte gilt im Weltraum, deshalb stimmen
+       die Schatten auch dann, wenn ihr Ausschnitt ein paar Bilder hinterherläuft. */
+    this.sun.shadow.autoUpdate = false;
+    this._shadowT = (this._shadowT || 0) + dt;
+    if (lit > 0.01 && (this._shadowT > 0.05 || this._snapShadow)) { this.sun.shadow.needsUpdate = true; this._shadowT = 0; this._snapShadow = false; }
+    const texel = 18 / 2048;
+    const lz = sd.clone().normalize();
+    const lx = new THREE.Vector3().crossVectors(Math.abs(lz.y) > .95 ? new THREE.Vector3(1, 0, 0) : UP, lz).normalize();
+    const ly = new THREE.Vector3().crossVectors(lz, lx);
+    const px = Math.round(this.pos.dot(lx) / texel) * texel, py = Math.round(this.pos.dot(ly) / texel) * texel, pz = this.pos.dot(lz);
+    const center = lx.multiplyScalar(px).addScaledVector(ly, py).addScaledVector(lz, pz);
+    this.sun.target.position.copy(center);
+    this.sun.position.copy(center).addScaledVector(sd, 22);
+    this.sun.color.setHSL(0.09, 0.28 * (1 - lit) + 0.06, 0.62 + 0.1 * lit);
+    /* Die Erde ist tagsüber ein Scheinwerfer von unten — dort, wo man sie sieht */
+    this.earthLight.intensity = pr.earth * (0.12 + 0.88 * lit);
+    this.earthLight.target.position.copy(this.pos);
+    this.earthLight.position.copy(this.pos).addScaledVector(earthDir, 8);
+    for (const dl of this.dynamic) if (dl.kind === 'window') dl.light.intensity = 0.5 + 2.6 * lit;
+
+    this._updatePool(dt);
+
+    /* Bildschirme in der Nähe, zwölfmal je Sekunde */
+    this._screenT += dt;
+    if (this._screenT > 1 / 12) {
+      this._screenT = 0;
+      for (const s of this.screens) if (s.pos.distanceToSquared(this.pos) < 110) s.mesh.userData.draw?.(t, []);
+    }
+    for (const r of this.spinners) r.rotation.y = t * 3.3;
 
     // Pflanzen wiegen sich leicht
     let i = 0;
@@ -1116,5 +1786,46 @@ export class Interior {
       mesh.rotation.x = Math.cos(t * 0.42 + i * 1.7) * 0.009;
       i++;
     }
+    return room;
+  }
+
+  /* Die nächstgelegenen, hellsten Lampen bekommen die Lichter aus dem Pool.
+     Wer herausfällt, blendet erst aus, bevor sein Platz neu vergeben wird —
+     so springt beim Durchqueren kein Licht. Die Zahl der Lichter bleibt fest,
+     dadurch muss kein Shader neu übersetzt werden. */
+  _updatePool(dt) {
+    const p = this.pos;
+    for (const s of this.sources) {
+      const d2 = s.pos.distanceToSquared(p);
+      const reach = (s.light.distance || 10) + 6;
+      s.score = d2 > reach * reach || s.light.intensity <= 0 ? 0 : s.light.intensity / (0.8 + d2);
+    }
+    const want = this.sources.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, POOL);
+    const wanted = new Set(want);
+    const fadeStep = dt * 4;
+    for (const l of this.pool) {
+      const u = l.userData;
+      if (u.src && !wanted.has(u.src)) u.fade = Math.max(0, u.fade - fadeStep);
+      else if (u.src) u.fade = Math.min(1, u.fade + fadeStep);
+      if (u.src && u.fade <= 0 && !wanted.has(u.src)) u.src = null;
+    }
+    const taken = new Set(this.pool.map(l => l.userData.src).filter(Boolean));
+    for (const s of want) {
+      if (taken.has(s)) continue;
+      const free = this.pool.find(l => !l.userData.src);
+      if (!free) break;
+      free.userData.src = s; free.userData.fade = this._snapLight ? 1 : 0;
+      taken.add(s);
+    }
+    for (const l of this.pool) {
+      const s = l.userData.src;
+      if (!s) { l.intensity = 0; continue; }
+      l.position.copy(s.pos);
+      l.color.copy(s.light.color);
+      l.distance = s.light.distance;
+      l.decay = s.light.decay;
+      l.intensity = s.light.intensity * l.userData.fade;
+    }
   }
 }
+const _g = new THREE.Vector3();

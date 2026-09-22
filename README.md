@@ -52,8 +52,8 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 
 | | |
 |---|---|
-| **Grafik** | Three.js (WebGL2), eigene Shader, Bloom & Filmkorn |
-| **Erde** | Satellitenkarten (Tagseite 8K, Nachtlichter, Relief, Rauheit, Wolken) in einem eigenen Shader. Aus 600 km sind selbst 8192 Texel noch sechsfach vergrößert, deshalb kubische Vergrößerung plus eine vorberechnete Detailkarte für Gelände, Wolkenfasern und Ortschaften. Fehlen die Bilder, erzeugt das Spiel Ersatzkarten selbst |
+| **Grafik** | Three.js (WebGL2), eigene Shader, eigener Bloom (Dual-Filter), AgX-Tonwerte, Filmkorn |
+| **Erde** | Physikalisch gerechnet: Pro Bildpunkt ein Strahl durch die Atmosphäre (Rayleigh, Aerosol, Ozon, Mehrfachstreuung nach Hillaire 2020). Daraus entstehen der dünne blaue Saum, der Dunst zum Horizont, der rote Terminator und die untergehende Sonne von selbst. Boden aus NASA Blue Marble in 16K — die Aufnahme des aktuellen Monats, im Winter mit Schnee —, Relief aus GEBCO-Höhen, Sonnenglanz auf dem Wasser nach GGX. Wolken aus der 1-km-Wolkenkarte der NASA mit Höhe, Selbstbeschattung und Schatten auf dem Boden. Nachts Black Marble 2016 und grünes Airglow am Horizont |
 | **Bodenspur** | echt gerechnet: Die Erde dreht sich geografisch korrekt unter der Station durch, die Cupola sagt, worüber du gerade fliegst |
 | **Bahnmechanik** | echt gerechnet: Keplersche Umlaufzeit, Betawinkel, Schattenanteil |
 | **Musik** | generativ per Web Audio API — Drone, wandernde Akkordflächen, Glockentöne. Kein Audiomaterial, wiederholt sich praktisch nie |
@@ -62,10 +62,17 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 
 ### Räume
 
-Außenansicht (zugleich das Menü), Lounge mit Panoramafenster, **Cupola** mit
-Rundumsicht, Gewächsraum, Labor, Technik, Frachtschleuse — später
-Hydroponik-Modul, Pilzkammer, Vertikalfarm und ein Kuppelgewächshaus im echten
-Sonnenlicht.
+Die Station ist begehbar. Alle gebauten Module hängen an einem Knoten in der
+Mitte und sind durch Luken verbunden: in Flugrichtung Gewächsraum, Labor und
+Vertikalfarm, dagegen Technik und Frachtschleuse, seitlich die Lounge mit dem
+Panoramafenster, gegenüber Hydroponik und Pilzkammer, unten zur Erde die
+**Cupola**, oben das Kuppelgewächshaus. Man schwebt frei hindurch —
+schwerelos, aber mit aufrechtem Blick.
+
+Die Station fliegt 28° zur Erde geneigt. Dadurch liegt der Horizont mitten im
+Panoramafenster der Lounge, und die Sonne scheint mit echtem Stand und echten
+Schatten durch die Fenster — alle 96 Minuten wandert ein Lichtfleck über die
+Wände, geht unter und kommt auf der anderen Seite wieder.
 
 Die Cupola ist der ISS-Aussichtskuppel nachempfunden: sechs trapezförmige
 Seitenfenster um eine runde Mittelscheibe, dazwischen nur Rahmen — der Blick
@@ -90,24 +97,33 @@ src/
   core/      util, orbit (Bahnmechanik), save, events
   data/      plants, modules, research, shop, mails   ← Inhalte
   game/      state, sim (Wachstumsmodell), actions, mail
-  gfx/       renderer, sky (Erde), station, exterior, interior, plants3d
+  gfx/       renderer, earth (Atmosphäre & Erde), sky, station, exterior,
+             interior (begehbare Station), plants3d
   audio/     music (generativ), sfx
   ui/        ui (HUD), panels, icons
 vendor/three/
 ```
 
-Die Erdtexturen liegen unter `assets/planet/`; Herkunft und Lizenzen stehen in
-`assets/planet/HERKUNFT.md` — die 8K-Tagkarte stammt von Solar System Scope
-(CC BY 4.0), der Rest aus dem three.js-Beispielverzeichnis.
+Die Erdkarten liegen unter `assets/earth/`, Herkunft in
+`assets/earth/HERKUNFT.md` — alles NASA- bzw. GEBCO-Daten. Neu erzeugen lassen
+sie sich mit `tools/earth_textures.py` aus den Originalen.
 
 Wer eigene Pflanzen hinzufügen will: `src/data/plants.js`. Ein Eintrag mit
 echten Werten für `days`, `dli`, `water`, `temp`, `ph` reicht — den Rest macht
 die Simulation.
 
-### Tastatur
+### Steuerung
 
-`W` alles gießen · `H` alles ernten · `M` Funkverkehr · `K` Kompendium ·
+In der Station: **Maus ziehen** zum Umsehen, **WASD** oder Pfeiltasten zum
+Schweben, **Leertaste / Shift** hoch und runter, **Doppelklick** schwebt
+dorthin, wo man hinzeigt, **E** öffnet die Konsole des Raums. Auf dem Handy:
+wischen, mit zwei Fingern vor und zurück, doppelt tippen.
+
+`B` alles gießen · `H` alles ernten · `M` Funkverkehr · `K` Kompendium ·
 `Esc` zurück zur Außenansicht
+
+Zum Ansehen: `?phase=0.3` springt an eine Stelle der Umlaufbahn (0 = Mittag,
+0,5 = Mitte des Erdschattens), ohne die Simulation anzufassen.
 
 ---
 

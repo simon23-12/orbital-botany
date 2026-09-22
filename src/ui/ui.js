@@ -34,11 +34,12 @@ export const UI = {
     this.els.modal.addEventListener('click', e => { if (e.target.closest('[data-close]')) this.closeModal(); });
 
     document.addEventListener('keydown', e => {
-      if (e.target.matches('input,textarea,select')) return;
+      if (e.target.matches?.('input,textarea,select')) return;
       if (e.key === 'Escape') { if (!this.els.modal.hidden) this.closeModal(); else if (this.panel) this.close(); else app.goExterior(); }
       else if (e.key === 'm' || e.key === 'M') this.open('mail');
       else if (e.key === 'g' || e.key === 'G') { const m = app.st.modules.grow_a?.built ? 'grow_a' : null; if (m) app.goRoom(m); }
-      else if (e.key === 'w' || e.key === 'W') this.doWaterAll();
+      // W gehört drinnen der Bewegung — gegossen wird überall mit B
+      else if (e.key === 'b' || e.key === 'B' || ((e.key === 'w' || e.key === 'W') && app.mode !== 'interior')) this.doWaterAll();
       else if (e.key === 'h' || e.key === 'H') this.doHarvestAll();
       else if (e.key === 'k' || e.key === 'K') this.open('codex');
     });
@@ -120,12 +121,14 @@ export const UI = {
     this.panel = { id, arg };
     this.render();
     this.buildRooms();
+    this.app.walkHint?.();
   },
   close() {
     this.panel = null;
     this._panelKey = null;
     clear(this.els.stage);
     this.buildRooms();
+    this.app.walkHint?.();
   },
 
   /** Bedient der Spieler gerade etwas? Dann nicht dazwischenfunken. */
@@ -210,7 +213,7 @@ export const UI = {
         tip: `<b>CO₂</b>${num(st.co2Target)} ppm Sollwert<br>Erdatmosphäre: 420 ppm. Pflanzen legen bis etwa 1200 ppm deutlich zu.<br>Über 1500 ppm wird es für dich unangenehm.` },
     ];
     if (ready) stats.push({ ic: 'scissors', v: String(ready), u: 'reif', cls: 'ok', tip: `<b>${ready} erntereif</b>Taste H erntet alles.` });
-    if (thirsty) stats.push({ ic: 'droplets', v: String(thirsty), u: 'durstig', cls: 'warn', tip: `<b>${thirsty} Tabletts trocken</b>Taste W gießt alles.` });
+    if (thirsty) stats.push({ ic: 'droplets', v: String(thirsty), u: 'durstig', cls: 'warn', tip: `<b>${thirsty} Tabletts trocken</b>Taste B gießt alles.` });
 
     const box = this.els.stats;
     box.innerHTML = stats.map(s => `

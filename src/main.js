@@ -8,6 +8,7 @@ import { Stage } from './gfx/renderer.js';
 import { Sky } from './gfx/sky.js';
 import { Exterior } from './gfx/exterior.js';
 import { Interior } from './gfx/interior.js';
+import { PITCH } from './gfx/station.js';
 import { MOD_BY_ID } from './data/modules.js';
 import { RES_BY_ID } from './data/research.js';
 import { BY_ID as PL } from './data/plants.js';
@@ -16,7 +17,7 @@ import * as SIM from './game/sim.js';
 import * as A from './game/actions.js';
 import { checkMail, unread } from './game/mail.js';
 import { load, save as saveGame, newGame } from './core/save.js';
-import { solar, beta, BETA_CRIT, PERIOD } from './core/orbit.js';
+import { solar, beta, BETA_CRIT, PERIOD, phase as orbitPhase } from './core/orbit.js';
 import { UI } from './ui/ui.js';
 import { icon } from './ui/icons.js';
 import { music } from './audio/music.js';
@@ -38,8 +39,23 @@ const step = (pct, text) => {
   });
 };
 
+/* Nur zum Ansehen: ?t=<Minuten> verschiebt Sonnenstand und Bodenspur, ohne die
+ * Simulation anzufassen; ?phase=<0…1> springt an eine Stelle der Umlaufbahn
+ * (0 = Mittag über der Station, 0,5 = Mitte des Erdschattens). */
+const VIEW_SHIFT = (() => {
+  const q = new URLSearchParams(location.search);
+  if (q.has('phase')) return ((Number(q.get('phase')) - orbitPhase(Date.now()) + 1) % 1) * PERIOD;
+  return (Number(q.get('t')) || 0) * MIN;
+})();
+
+/* Drinnen gilt das Bezugssystem der Station, draußen das der Bahn. Beide
+ * trennt die Fluglage: Erde und Sonne werden für den Innenraum mitgedreht. */
+const ATTITUDE = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -PITCH);
+
 const app = {
   st: null, stage: null, sky: null, exterior: null, interior: null,
+  sunInside: new THREE.Vector3(0, 1, 0),
+  earthInside: new THREE.Vector3(0, -1, 0).applyQuaternion(ATTITUDE),
   room: null, mode: 'exterior', last: 0, saveTimer: 0, mailTimer: 0,
   sunLocal: new THREE.Vector3(0, 1, 0),
 
@@ -52,21 +68,18 @@ const app = {
       this.stage = new Stage($('#webgl-root'), quality);
 
       await step(18, 'Satellitenkarten der Erde werden geladen …');
-      const segs = this.stage.q.segs;
-      const texSize = this.stage.qualityName === 'low' ? 1024 : this.stage.qualityName === 'ultra' ? 4096 : 2048;
-      // Die hoch aufgelöste Tagkarte nur dort, wo Speicher und Füllrate reichen
       const q = this.stage.qualityName;
-      this.sky = await Sky.create(this.stage.renderer, segs, texSize, (f, key) => {
-        const label = { day: 'Tagseite', night: 'Nachtlichter', brc: 'Relief & Wolken' }[key] || key;
-        step(18 + f * 34, `${label} geladen …`);
-      }, { hires: q === 'high' || q === 'ultra', cubic: q !== 'low' });
-
-      // Das Feindetail liegt als vorberechnete Karte vor und kostet nur noch
-      // drei Abgriffe — es kann auf jeder Stufe anbleiben.
-      this.sky.uniforms.uDetail.value = 1;
+      this.sky = await Sky.create(this.stage.renderer, {
+        quality: q,
+        onProgress: (f, key) => {
+          const label = { day: 'Blue Marble', clouds: 'Wolkenkarte', night: 'Nachtlichter', terrain: 'Relief & Küsten' }[key] || key;
+          step(18 + f * 34, `${label} wird geladen … ${Math.round(f * 100)} %`);
+        },
+      });
 
       await step(52, 'Sterne werden gesetzt …');
       this.exterior = new Exterior(this.sky);
+      this.exterior.buildEnvironment(this.stage.renderer);
       this.interior = new Interior(this.sky);
 
       await step(66, 'Spielstand wird gesucht …');
@@ -137,6 +150,8 @@ const app = {
     this.goExterior();
     this.last = performance.now();
     requestAnimationFrame(t => this.loop(t));
+    // Auf starken Rechnern die 16K-Karten im Hintergrund nachladen
+    if (this.stage.q.earth16k) setTimeout(() => this.sky.upgrade(), 1500);
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.save(); }
@@ -195,10 +210,11 @@ const app = {
   goExterior() {
     this.mode = 'exterior';
     this.room = null;
+    this.interior.active = false;
     this.sky.earthGroup.position.set(0, -this.sky.earthDistance, 0);
+    this.sky.earthGroup.quaternion.identity();
     this.stage.use(this.exterior.scene, this.exterior.camera, {
-      sky: { scene: this.sky.scene, camera: this.sky.camera },
-      bloomStrength: 0.6, bloomRadius: .7, bloomThreshold: 1.2, grain: .028,
+      sky: this.sky, bloomStrength: 0.6, bloomRadius: .7, bloomThreshold: 1.2, grain: .028,
     });
     if (!this.exterior.controls) this.exterior.attachControls(this.stage.renderer.domElement);
     this.exterior.controls.enabled = true;
@@ -206,45 +222,107 @@ const app = {
     UI.close();
     UI.buildRooms();
     this.bindPointer();
+    this.walkHint(null);
   },
 
+  /** Kurz abblenden, umsetzen, aufblenden. */
+  fade(fn) {
+    const f = $('#fade');
+    if (!f) { fn(); return; }
+    f.classList.add('is-on');
+    // Zeitgeber statt requestAnimationFrame: der ruht in Hintergrund-Tabs,
+    // und das Bild bliebe schwarz
+    setTimeout(() => { fn(); setTimeout(() => f.classList.remove('is-on'), 40); }, 180);
+  },
+
+  /** In einen Raum springen — per Raumleiste, Tastatur oder Klick von außen. */
   goRoom(id) {
     if (!this.st.modules[id]?.built) return;
-    this.mode = 'interior';
-    this.room = id;
-    if (this.exterior.controls) this.exterior.controls.enabled = false;
-    this.interior.setRoom(id, this.st);
-    const dir = this.interior.ctx.window?.dir
-      ? this.interior.ctx.window.dir.clone()
-      : new THREE.Vector3(0, -1, 0);
-    this.roomEarthDir = dir.clone().normalize();
-    this.roomQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), this.roomEarthDir);
-    this.sky.earthGroup.position.copy(this.roomEarthDir).multiplyScalar(this.sky.earthDistance);
-
-    const def = MOD_BY_ID[id];
-    // Räume ohne Fenster brauchen keinen Himmel: Die Erde würde formatfüllend
-    // gerendert und anschließend komplett von der Modulwand übermalt.
-    const seesOut = !!this.interior.ctx.window;
-    this.stage.use(this.interior.scene, this.interior.camera, {
-      sky: seesOut ? { scene: this.sky.scene, camera: this.sky.camera } : null,
-      // Schwelle über der Wolkenhelligkeit: sonst blüht die ganze Tagseite
-      bloomStrength: id === 'lounge' ? .5 : .42, bloomRadius: .62, bloomThreshold: 1.25, grain: .022, vignette: 1.1,
+    const enter = this.mode !== 'interior';
+    sfx.whoosh();
+    this.fade(() => {
+      this.mode = 'interior';
+      if (this.exterior.controls) this.exterior.controls.enabled = false;
+      this.interior.ensure(this.st);
+      this.interior.teleport(id);
+      this.interior.active = true;
+      this.sky.earthGroup.position.set(0, -this.sky.earthDistance, 0).applyQuaternion(ATTITUDE);
+      this.sky.earthGroup.quaternion.copy(ATTITUDE);
+      if (enter) {
+        this.stage.use(this.interior.scene, this.interior.camera, {
+          // Schwelle über der Wolkenhelligkeit: sonst blüht die ganze Tagseite
+          sky: this.sky, bloomStrength: .45, bloomRadius: .62, bloomThreshold: 1.25, grain: .022, vignette: 1.1,
+          exposure: 1.35,
+        });
+        this.interior.attachControls(this.stage.renderer.domElement, { onInteract: () => this.openRoomPanel() });
+      }
+      this.enterRoom(id);
+      this.openRoomPanel();
+      this.bindPointer();
+      if (!this._walkTaught) this.walkHint('intro');
     });
-    UI.setRoomLabel(def.name, def.short + ' · Modul');
-    const panelId = id === 'lounge' ? 'lounge'
+  },
+
+  /** Raum gewechselt, weil man hineingeschwebt ist. */
+  enterRoom(id) {
+    this.room = id;
+    const def = MOD_BY_ID[id];
+    if (def) UI.setRoomLabel(def.name, def.short + ' · Modul');
+    else UI.setRoomLabel('Knoten', 'Verbindungsmodul · Station Hedera');
+    UI.buildRooms();
+    this.walkHint();
+  },
+
+  roomPanel(id) {
+    if (!MOD_BY_ID[id]) return null;
+    return id === 'lounge' ? 'lounge'
       : id === 'cupola' ? 'cupola'
       : id === 'lab' ? 'research'
       : id === 'systems' ? 'systems'
       : id === 'cargo' ? 'shop'
       : 'grow';
-    UI.open(panelId, panelId === 'grow' ? id : undefined);
-    UI.buildRooms();
-    this.bindPointer();
-    sfx.whoosh();
   },
 
-  reloadRoom() { if (this.mode === 'interior' && this.room) this.interior.setRoom(this.room, this.st); },
-  rebuildStation() { this.exterior.build(this.st); },
+  openRoomPanel() {
+    const p = this.roomPanel(this.room);
+    if (!p) return;
+    const arg = p === 'grow' ? this.room : undefined;
+    if (UI.panel?.id === p && UI.panel?.arg === arg) return;
+    UI.open(p, arg);
+    this.walkHint();
+  },
+
+  /** Hinweis unten in der Mitte: erst die Steuerung, dann was man hier tun kann. */
+  walkHint(kind) {
+    const h = $('#walkhint');
+    if (!h) return;
+    if (kind === null || this.mode !== 'interior') { h.hidden = true; return; }
+    if (kind === 'intro') {
+      const touch = matchMedia('(pointer: coarse)').matches;
+      h.innerHTML = touch
+        ? '<b>Wischen</b> umsehen · <b>Zwei Finger</b> vor & zurück · <b>Doppeltippen</b> hinschweben'
+        : '<b>Ziehen</b> umsehen · <b>WASD</b> schweben · <b>Leertaste/Shift</b> hoch & runter · <b>Doppelklick</b> hinschweben';
+      h.hidden = false;
+      clearTimeout(this._hintT);
+      this._hintT = setTimeout(() => { this._walkTaught = true; this.walkHint(); }, 9000);
+      return;
+    }
+    if (!this._walkTaught) return;
+    const p = this.roomPanel(this.room);
+    const open = UI.panel && UI.panel.id === p;
+    if (p && !open) {
+      const def = MOD_BY_ID[this.room];
+      h.innerHTML = `<kbd>E</kbd> ${def.name} · Konsole öffnen`;
+      h.hidden = false;
+    } else h.hidden = true;
+  },
+
+  reloadRoom() { if (this.mode === 'interior') this.interior.ensure(this.st); },
+  rebuildStation() {
+    this.exterior.build(this.st);
+    if (this.mode === 'interior') this.interior.ensure(this.st);
+    else this.interior.sig = null;           // beim nächsten Betreten neu bauen
+  },
   syncScene() { if (this.mode === 'interior') this.interior.syncPlants(this.st); },
 
   bindPointer() {
@@ -265,13 +343,12 @@ const app = {
           const built = this.st.modules[hit.moduleId]?.built;
           UI.showTip(`<b>${def.name}</b>${built ? def.desc : `Noch nicht gebaut — Freigabe ab Stufe ${def.level}.`}`, e.clientX, e.clientY);
         } else UI.hideTip();
-      } else {
-        this.interior.setPointer(nx, ny);
+      } else if (e.buttons === 0) {
         const hit = this.interior.pick(nx, ny);
-        dom.style.cursor = hit ? 'pointer' : 'default';
-      }
+        dom.style.cursor = hit ? 'pointer' : 'grab';
+      } else dom.style.cursor = 'grabbing';
     });
-    dom.addEventListener('pointerleave', () => { UI.hideTip(); this.interior.setPointer(0, 0); });
+    dom.addEventListener('pointerleave', () => { UI.hideTip(); });
     dom.addEventListener('pointerup', e => {
       const dt = performance.now() - downAt;
       const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
@@ -290,10 +367,10 @@ const app = {
           const slot = this.st.slots.find(s => s.id === hit.slotId);
           if (slot) {
             sfx.click();
-            UI.open(this.room === 'lounge' ? 'lounge' : 'grow', this.room);
+            const p = slot.mod === 'lounge' ? 'lounge' : 'grow';
+            if (!(UI.panel?.id === p && UI.panel?.arg === slot.mod)) UI.open(p, slot.mod);
             // Detailfenster über das Panel-Modul öffnen
-            const ev = new CustomEvent('slot:open', { detail: slot.id });
-            document.dispatchEvent(ev);
+            document.dispatchEvent(new CustomEvent('slot:open', { detail: slot.id }));
           }
         }
       }
@@ -314,16 +391,15 @@ const app = {
     if (log.length) this.handleLog(log);
 
     /* Sonnenstand im Stationssystem */
-    const sol = solar(nowMs);
-    const b = beta(nowMs) * DEG;
+    const viewMs = nowMs + VIEW_SHIFT;
+    const sol = solar(viewMs);
+    const b = beta(viewMs) * DEG;
     const ang = sol.phase * TAU;
     this.sunLocal.set(Math.cos(b) * Math.sin(ang), Math.cos(b) * Math.cos(ang), Math.sin(b)).normalize();
 
-    this.sky.update(dt, t, nowMs);
+    this.sky.update(dt, t, viewMs);
 
-    // Die Sonne verschwindet hinter der Erde von selbst (Tiefentest); beim
-    // Auf- und Untergang dämpft die Atmosphäre sie zusätzlich.
-    this.sky.sun.userData.mat.uniforms.uFade.value = 0.30 + 0.70 * sol.sun;
+    this.sky.setDaylight(sol.sun);
 
     if (this.mode === 'exterior') {
       this.sky.setSun(this.sunLocal);
@@ -331,11 +407,11 @@ const app = {
       this.exterior.update(dt, t, st);
       this.sky.syncTo(this.exterior.camera);
     } else {
-      this.interior.update(dt, t, st, sol);
-      if (this.interior.ctx.window) {
-        this.sky.setSun(this.sunLocal.clone().applyQuaternion(this.roomQuat));
-        this.sky.syncTo(this.interior.camera);
-      }
+      this.sunInside.copy(this.sunLocal).applyQuaternion(ATTITUDE);
+      const room = this.interior.update(dt, t, st, sol, this.sunInside, this.earthInside);
+      if (room !== this.room) this.enterRoom(room);
+      this.sky.setSun(this.sunInside);
+      this.sky.syncTo(this.interior.camera);
     }
 
     this.stage.render(dt);

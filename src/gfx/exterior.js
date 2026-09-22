@@ -3,7 +3,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildStation, LAYOUT } from './station.js';
+import { buildStation, LAYOUT, PITCH } from './station.js';
 import { MOD_BY_ID } from '../data/modules.js';
 import { clamp, TAU } from '../core/util.js';
 
@@ -33,10 +33,38 @@ export class Exterior {
 
     this.stationGroup = new THREE.Group();
     this.scene.add(this.stationGroup);
+    this.envReady = false;
     this.station = null;
     this.raycaster = new THREE.Raycaster();
     this.hovered = null;
     this.drift = 0;
+  }
+
+  /* Umgebung zum Spiegeln: oben schwarzer Himmel, unten die helle Erde mit
+     blauem Saum. Ohne sie wirken Metallteile schwarz, als hinge die Station
+     in einem Loch. */
+  buildEnvironment(renderer) {
+    if (this.envReady) return;
+    const envScene = new THREE.Scene();
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false,
+      vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        varying vec3 vD;
+        void main(){
+          float y = normalize(vD).y;
+          /* Die Erde füllt aus 600 km alles unterhalb von −24° */
+          float earth = smoothstep(-0.36, -0.46, y);
+          float limb = exp(-pow((y + 0.41) / 0.035, 2.0));
+          vec3 c = vec3(0.28, 0.36, 0.48) * earth + vec3(0.25, 0.45, 0.9) * limb * 0.6;
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    });
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), mat));
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.scene.environment = pmrem.fromScene(envScene, 0).texture;
+    pmrem.dispose();
+    this.envReady = true;
   }
 
   attachControls(dom) {
@@ -98,8 +126,10 @@ export class Exterior {
     this.sun.position.copy(dir).multiplyScalar(60);
     this.sun.target.position.set(0, 0, 0);
     this.sun.intensity = 3.6 * intensity;
-    this.earthLight.intensity = 0.55 + 0.5 * intensity;
-    this.fill.intensity = 0.3 + 0.35 * intensity;
+    this.earthLight.intensity = 0.35 + 0.35 * intensity;
+    this.fill.intensity = 0.2 + 0.3 * intensity;
+    // Die Erde ist nur auf der Tagseite ein heller Spiegel
+    this.scene.environmentIntensity = 0.15 + 0.85 * intensity;
     if (this.station) this.station._sunLocal = dir;
   }
 
@@ -109,7 +139,7 @@ export class Exterior {
     // langsames Treiben der Station um alle drei Achsen
     this.drift += dt;
     this.stationGroup.rotation.set(
-      Math.sin(this.drift * 0.043) * 0.028,
+      PITCH + Math.sin(this.drift * 0.043) * 0.028,
       Math.sin(this.drift * 0.031 + 1.2) * 0.05,
       Math.sin(this.drift * 0.037 + 2.4) * 0.022,
     );

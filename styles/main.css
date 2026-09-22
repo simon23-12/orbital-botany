@@ -182,6 +182,22 @@ svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-l
 .room__dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .rooms__sep{height:1px;background:var(--line);margin:.3rem .5rem}
 
+/* ============================ BEGEHEN ============================ */
+.fade{position:fixed;inset:0;z-index:60;background:#02040a;opacity:0;pointer-events:none;transition:opacity .18s linear}
+.fade.is-on{opacity:1}
+.walkhint{
+  position:fixed;left:50%;bottom:1.4rem;translate:-50% 0;z-index:25;pointer-events:none;
+  padding:.5rem .95rem;border-radius:99px;background:var(--glass-2);border:1px solid var(--line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:var(--shadow);
+  font-size:.8rem;color:var(--ink-dim);white-space:nowrap;animation:fadeUp .5s var(--ease) both;
+}
+.walkhint b{color:var(--ink);font-weight:500}
+.walkhint kbd{
+  display:inline-grid;place-items:center;min-width:1.45rem;height:1.45rem;margin-right:.35rem;padding:0 .3rem;
+  border-radius:6px;border:1px solid var(--line-strong);background:rgba(255,255,255,.06);
+  font-family:var(--mono);font-size:.72rem;color:var(--ink)
+}
+
 /* ============================ STAGE / PANELS ============================ */
 .stage{
   position:fixed;inset:var(--hud-h) 0 0 0;z-index:20;pointer-events:none;
@@ -491,6 +507,7 @@ input[type=range]::-moz-range-thumb{width:15px;height:15px;border:0;border-radiu
     border-left:0;border-right:0;border-bottom:0;justify-content:flex-start;overflow-x:auto;max-height:none;padding:.4rem
   }
   .stage{bottom:64px;inset:var(--hud-h) 0 64px 0}
+  .walkhint{bottom:76px;white-space:normal;width:max-content;max-width:calc(100% - 2rem);text-align:center}
   .room__label{display:none}
   .hud__stats{gap:0}
   .stat{padding:.3rem .35rem}
