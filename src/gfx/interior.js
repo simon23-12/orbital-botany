@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
+import { rackMaterial, panelTexture, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
 import { BY_ID as PLANT_BY_ID, stageAt } from '../data/plants.js';
 import { MOD_BY_ID } from '../data/modules.js';
@@ -61,6 +62,9 @@ function lightStrip(len, color = 0xdfeaff, intensity = 1) {
 }
 
 /** Bildschirmfläche mit animiertem Inhalt. */
+const SCREEN_LABELS = [
+  ['O₂', '21.0 %'], ['CO₂', '1100 ppm'], ['T', '22.4 °C'], ['RH', '58 %'], ['P', '101.2 kPa'], ['H₂O', '184 L'],
+];
 function screen(w, h, hue = 0.55) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = Math.max(64, Math.round(256 * h / w));
@@ -69,19 +73,40 @@ function screen(w, h, hue = 0.55) {
   tex.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
     new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  // Gehäuse, damit der Bildschirm nicht als nackte Fläche in der Luft hängt
+  const bezel = new THREE.Mesh(new THREE.BoxGeometry(w + .05, h + .05, .035), outfitMats().laptop);
+  bezel.position.z = -.02;
+  m.add(bezel);
+  const seed = Math.floor(hue * 97);
+  const col = (l, a = 1) => `hsla(${hue * 360},80%,${l}%,${a})`;
   m.userData.draw = (t, lines) => {
     const W = c.width, H = c.height;
     ctx.fillStyle = '#060a12'; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = `hsla(${hue * 360},70%,60%,.14)`; ctx.lineWidth = 1;
+    ctx.strokeStyle = col(60, .12); ctx.lineWidth = 1;
     for (let i = 0; i < H; i += 6) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
-    ctx.fillStyle = `hsl(${hue * 360},80%,68%)`;
+    // Kopfzeile
+    ctx.fillStyle = col(55, .35); ctx.fillRect(0, 0, W, 16);
+    ctx.fillStyle = col(85); ctx.font = 'bold 10px monospace';
+    ctx.fillText('HEDERA · ECLSS', 6, 11);
+    ctx.fillText(new Date().toISOString().slice(11, 19), W - 58, 11);
+    // Messwerte
     ctx.font = '11px monospace';
-    (lines || []).forEach((ln, i) => ctx.fillText(ln, 8, 18 + i * 14));
+    const rows = lines?.length ? lines.map(l => [l, '']) : SCREEN_LABELS.slice(seed % 3, seed % 3 + 4);
+    rows.forEach(([k, v], i) => {
+      ctx.fillStyle = col(70); ctx.fillText(k, 8, 32 + i * 14);
+      ctx.fillStyle = col(88); ctx.fillText(v, 48, 32 + i * 14);
+    });
+    // Balken
+    for (let i = 0; i < 6; i++) {
+      const v = .35 + .45 * (.5 + .5 * Math.sin(t * .6 + i * 1.7 + seed));
+      ctx.fillStyle = col(62, .85);
+      ctx.fillRect(W - 90 + i * 14, 22 + (H * .45) * (1 - v), 9, (H * .45) * v);
+    }
     // laufende Kurve
-    ctx.strokeStyle = `hsl(${hue * 360},90%,62%)`; ctx.lineWidth = 1.6;
+    ctx.strokeStyle = col(62); ctx.lineWidth = 2;
     ctx.beginPath();
     for (let x = 0; x < W; x++) {
-      const y = H * 0.75 + Math.sin(x * 0.06 + t * 1.4) * 12 + Math.sin(x * 0.21 + t * 0.7) * 6;
+      const y = H * 0.8 + Math.sin(x * 0.06 + t * 1.4) * 10 + Math.sin(x * 0.21 + t * 0.7) * 5;
       x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
     ctx.stroke();
@@ -132,6 +157,16 @@ function tray(size = 0.58, withLamp = true) {
 
 /* ───────────────────────── Raumdefinitionen ───────────────────────── */
 
+/** Gepolsterte, warme Wandbespannung für die Lounge. */
+function cozyWall(len, rad) {
+  const m = outfitMats().padding.clone();
+  m.map = m.map.clone(); m.map.needsUpdate = true;
+  m.map.repeat.set(Math.round(TAU * rad / 1.5), Math.round(len / 1.5));
+  m.color.set(0xecdcc4);
+  m.side = THREE.BackSide;
+  return m;
+}
+
 /** Durchmesser der Luken zwischen den Modulen */
 const HATCH_R = 0.8;
 
@@ -156,11 +191,10 @@ function shell(len, rad, M, opts = {}) {
   const along = v => axis === 'x' ? new THREE.Vector3(v, 0, 0) : new THREE.Vector3(0, 0, v);
   const ends = opts.ends || (opts.openEnds ? { neg: 'open', pos: 'open' } : { neg: 'closed', pos: 'closed' });
 
+  /* Rackverkleidung rundum — eine Kachel ist gut 1,3 m breit und 1,6 m hoch */
   const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(rad, rad, len, 32, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: opts.color ?? 0xd8dcdf, roughness: .78, metalness: .12, side: THREE.BackSide,
-    })
+    new THREE.CylinderGeometry(rad, rad, len, 40, 1, true),
+    opts.cozy ? cozyWall(len, rad) : rackMaterial(opts.color ?? 0xffffff, Math.max(4, Math.round(TAU * rad / 1.3)), Math.max(1, Math.round(len / 1.6)))
   );
   if (axis === 'x') wall.rotation.z = Math.PI / 2; else wall.rotation.x = Math.PI / 2;
   wall.receiveShadow = true;
@@ -198,7 +232,8 @@ function shell(len, rad, M, opts = {}) {
     g.add(c);
   }
   // Stirnwände
-  const capMat = new THREE.MeshStandardMaterial({ color: 0xc3c9cd, roughness: .8, metalness: .15, side: THREE.DoubleSide });
+  const capTex = panelTexture().clone(); capTex.needsUpdate = true; capTex.repeat.set(.45, .45);
+  const capMat = new THREE.MeshStandardMaterial({ map: capTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide });
   for (const [key, sgn] of [['neg', -1], ['pos', 1]]) {
     const kind = ends[key];
     if (kind === 'open') continue;
@@ -244,11 +279,13 @@ const BIG = 50;
 const ROOMS = {
 
   /* ══ LOUNGE ══ */
-  lounge(st, ctx) {
+  lounge(st, ctx, modId, ports = {}) {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 7.6, RAD = 2.85;
-    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, axis: 'z', ends: { neg: 'open', pos: 'port' } }));
+    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, axis: 'z', ends: { neg: 'open', pos: 'port' }, cozy: true }));
+    dressModule(g, { len: LEN, rad: RAD, axis: 'z', zones: ['ceiling', 'ends'], seed: 21,
+      pos: { to: ports.nearName || 'Knoten', extinguisher: true } });
     // Außen hinter der Fensterwand
     const hullBack = new THREE.Mesh(new THREE.CircleGeometry(RAD + .08, 32), M.hull);
     hullBack.position.z = -3.95; hullBack.rotation.y = Math.PI;
@@ -288,26 +325,26 @@ const ROOMS = {
     const fab = fabricTexture('#37506b');
     const couchMat = new THREE.MeshStandardMaterial({ map: fab, color: 0x9fb6cf, roughness: .92, metalness: 0 });
     const couch = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.7, .34, 1.0), couchMat);
+    const seat = new THREE.Mesh(softBox(2.7, .34, 1.0), couchMat);
     seat.position.y = .42; seat.castShadow = seat.receiveShadow = true;
     couch.add(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(2.7, .78, .26), couchMat);
+    const back = new THREE.Mesh(softBox(2.7, .78, .26), couchMat);
     back.position.set(0, .78, .44); back.rotation.x = -.14;
     back.castShadow = true;
     couch.add(back);
     for (const s of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(.24, .5, 1.0), couchMat);
+      const arm = new THREE.Mesh(softBox(.24, .5, 1.0), couchMat);
       arm.position.set(s * 1.32, .55, 0); arm.castShadow = true;
       couch.add(arm);
     }
     for (let i = 0; i < 3; i++) {
-      const cu = new THREE.Mesh(new THREE.BoxGeometry(.82, .16, .82), couchMat);
+      const cu = new THREE.Mesh(softBox(.82, .16, .82), couchMat);
       cu.position.set((i - 1) * .88, .62, -.02); cu.rotation.x = -.05;
       couch.add(cu);
     }
     // Kissen
     for (const s of [-1, 1]) {
-      const k = new THREE.Mesh(new THREE.BoxGeometry(.42, .42, .14),
+      const k = new THREE.Mesh(softBox(.42, .42, .14),
         new THREE.MeshStandardMaterial({ map: fabricTexture('#7a5a48'), color: 0xd8b9a0, roughness: .95 }));
       k.position.set(s * .95, .78, .3); k.rotation.set(-.3, s * .3, s * .2);
       couch.add(k);
@@ -495,131 +532,174 @@ const ROOMS = {
    */
   cupola(st, ctx) {
     const M = mats();
+    const O = outfitMats();
     const g = new THREE.Group();
 
     /* Der weite Ring liegt bewusst HINTER dem Auge — wie wenn man den Kopf in
        die Kuppel steckt. So füllen die sechs Fenster jedes Seitenverhältnis bis
-       hinaus zu Ultrawide, ohne dass man seitlich am Rahmen vorbeisieht. */
-    const R1 = 1.95, Z1 = 0.78;        // weiter Ring, hinter dem Betrachter
+       hinaus zu Ultrawide, ohne dass man seitlich am Rahmen vorbeisieht.
+       Alles — Fenster, Kragen, Rückwand — hängt an denselben sechs Ecken.
+       Vorher hatte der Kragen eigene Ecken und ließ Spalten ins All offen. */
+    const R1 = 1.95, Z1 = 0.78;        // weiter Ring
     const R2 = 1.06, Z2 = -1.12;       // enger Ring, Fassung der Mittelscheibe
-    // Matt und hell: die Rahmen nehmen das Erdlicht diffus auf, statt es zu spiegeln
-    const frameMat = new THREE.MeshStandardMaterial({ color: 0xd8dee4, roughness: .58, metalness: .30 });
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x353b44, roughness: .72, metalness: .35, side: THREE.DoubleSide });
+    const ZB = Z1 + 1.56;              // Rückwand mit Luke
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xd8dee4, roughness: .5, metalness: .35 });
     const paneMat = new THREE.MeshBasicMaterial({
       color: 0x8fb8e0, transparent: true, opacity: .028, side: THREE.DoubleSide,
       depthWrite: false, blending: THREE.AdditiveBlending,
     });
-
     const corner = (i, r, z) => {
       const a = i * TAU / 6 + Math.PI / 6;
       return new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, z);
     };
+    const quad = (a, b, c, d, mat, uv) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray()], 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv || [0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1], 2));
+      geo.computeVertexNormals();
+      return new THREE.Mesh(geo, mat);
+    };
+    const hexShape = (r, holeR) => {
+      const sh = new THREE.Shape();
+      for (let i = 0; i <= 6; i++) { const p = corner(i, r, 0); i ? sh.lineTo(p.x, p.y) : sh.moveTo(p.x, p.y); }
+      if (holeR) { const h = new THREE.Path(); h.absarc(0, 0, holeR, 0, TAU, true); sh.holes.push(h); }
+      return sh;
+    };
 
-    /* Sechs Pfosten zwischen den Ringen, dazwischen je eine Scheibe */
     for (let i = 0; i < 6; i++) {
       const aTop = corner(i, R1, Z1), aBot = corner(i, R2, Z2);
-      const mid = aTop.clone().lerp(aBot, .5);
-      const len = aTop.distanceTo(aBot);
-      const post = new THREE.Mesh(new THREE.BoxGeometry(.085, .085, len), frameMat);
-      post.position.copy(mid);
-      post.lookAt(aBot);
-      g.add(post);
-
-      /* Trapezscheibe zwischen zwei Pfosten */
       const bTop = corner(i + 1, R1, Z1), bBot = corner(i + 1, R2, Z2);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute([
-        aTop.x, aTop.y, aTop.z, bTop.x, bTop.y, bTop.z, bBot.x, bBot.y, bBot.z,
-        aTop.x, aTop.y, aTop.z, bBot.x, bBot.y, bBot.z, aBot.x, aBot.y, aBot.z,
-      ], 3));
-      geo.computeVertexNormals();
-      const pane = new THREE.Mesh(geo, paneMat);
+      /* Pfosten mit Fensterlade-Kurbel */
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.09, .09, aTop.distanceTo(aBot)), frameMat);
+      post.position.copy(aTop).lerp(aBot, .5); post.lookAt(aBot);
+      g.add(post);
+      const crank = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, .06, 10), M.metal);
+      crank.position.copy(aTop).lerp(aBot, .22).multiply(new THREE.Vector3(.93, .93, 1));
+      crank.lookAt(0, 0, crank.position.z);
+      crank.rotateX(Math.PI / 2);
+      g.add(crank);
+      /* Trapezscheibe */
+      const pane = quad(aTop, bTop, bBot, aBot, paneMat);
       pane.renderOrder = 3;
       g.add(pane);
-
       /* Rahmenkante oben und unten */
-      for (const [p1, p2, w] of [[aTop, bTop, .075], [aBot, bBot, .065]]) {
+      for (const [p1, p2, w] of [[aTop, bTop, .085], [aBot, bBot, .07]]) {
         const bar = new THREE.Mesh(new THREE.BoxGeometry(w, w, p1.distanceTo(p2)), frameMat);
-        bar.position.copy(p1).lerp(p2, .5);
-        bar.lookAt(p2);
+        bar.position.copy(p1).lerp(p2, .5); bar.lookAt(p2);
         g.add(bar);
       }
+      /* Kragen: sechs gepolsterte Flächen exakt auf den Ecken des weiten Rings */
+      const cA = corner(i, R1, Z1), cB = corner(i + 1, R1, Z1), cC = corner(i + 1, R1, ZB), cD = corner(i, R1, ZB);
+      g.add(quad(cA, cB, cC, cD, O.padding, [0, 0, 1.5, 0, 1.5, 1.2, 0, 0, 1.5, 1.2, 0, 1.2]));
+      // Außenhaut dahinter
+      const k = 1.06;
+      g.add(quad(cD.clone().multiply(new THREE.Vector3(k, k, 1)), cC.clone().multiply(new THREE.Vector3(k, k, 1)),
+        cB.clone().multiply(new THREE.Vector3(k, k, 1)), cA.clone().multiply(new THREE.Vector3(k, k, 1)), M.hull));
+      /* Kanten des Kragens */
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(.07, .07, ZB - Z1), frameMat);
+      edge.position.copy(cA).lerp(cD, .5).multiply(new THREE.Vector3(.985, .985, 1));
+      g.add(edge);
     }
 
-    /* Mittelscheibe — 80 cm, das größte Fenster, das je geflogen ist */
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(R2 * .95, .042, 10, 44), frameMat);
-    ring.position.z = Z2;
+    /* Rahmenplatte am weiten Ring — verdeckt die Fuge zwischen Kragen und Fenstern */
+    const topPlate = new THREE.Mesh(new THREE.ShapeGeometry(hexShape(R1), 1), frameMat);
+    topPlate.geometry = new THREE.ShapeGeometry((() => { const sh = hexShape(R1); const h = new THREE.Path();
+      for (let i = 0; i <= 6; i++) { const p = corner(-i, R1 * .92, 0); i ? h.lineTo(p.x, p.y) : h.moveTo(p.x, p.y); } sh.holes.push(h); return sh; })(), 1);
+    topPlate.position.z = Z1;
+    g.add(topPlate);
+
+    /* Mittelscheibe — 80 cm, das größte Fenster, das je geflogen ist — in
+       einer sechseckigen Fassung, die den engen Ring dicht abschließt */
+    const CR = R2 * .84;
+    const bottom = new THREE.Mesh(new THREE.ShapeGeometry(hexShape(R2, CR), 40), frameMat);
+    bottom.position.z = Z2;
+    g.add(bottom);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(CR, .04, 10, 48), frameMat);
+    ring.position.z = Z2 + .01;
     g.add(ring);
-    const centre = new THREE.Mesh(new THREE.CircleGeometry(R2 * .93, 44), paneMat);
-    centre.position.z = Z2 + .01;
+    const centre = new THREE.Mesh(new THREE.CircleGeometry(CR, 48), paneMat);
+    centre.position.z = Z2 - .01;
     centre.renderOrder = 3;
     g.add(centre);
 
-    /* Kragen hinter dem Betrachter: Übergang zum Modul.
-       Er beginnt bewusst erst hinter der Kamera — sonst schiebt er sich auf
-       breiten Bildschirmen von den Seiten ins Bild und verdeckt die Aussicht. */
-    const COLLAR_START = 0.84;
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(R1 * 1.04, R1 * 1.04, 1.5, 6, 1, true), innerMat);
-    collar.rotation.x = Math.PI / 2;
-    collar.rotation.z = Math.PI / 6;
-    collar.position.z = COLLAR_START + .75;
-    g.add(collar);
     /* Rückwand mit Durchstieg nach oben in den Knoten */
-    const hex = new THREE.Shape();
-    for (let i = 0; i <= 6; i++) {
-      const a = i * TAU / 6 + Math.PI / 6;
-      const x = Math.cos(a) * R1 * 1.04 / Math.cos(Math.PI / 6), y = Math.sin(a) * R1 * 1.04 / Math.cos(Math.PI / 6);
-      i ? hex.lineTo(x, y) : hex.moveTo(x, y);
-    }
-    const hole = new THREE.Path(); hole.absarc(0, 0, HATCH_R, 0, TAU, true); hex.holes.push(hole);
-    const back = new THREE.Mesh(new THREE.ShapeGeometry(hex, 32), innerMat);
-    back.position.z = COLLAR_START + 1.5;
+    const back = new THREE.Mesh(new THREE.ShapeGeometry(hexShape(R1, HATCH_R), 40), O.padding);
+    back.position.z = ZB;
     g.add(back);
     const hatch = new THREE.Mesh(new THREE.TorusGeometry(HATCH_R + .04, .07, 10, 36), M.metal);
-    hatch.position.z = COLLAR_START + 1.47;
+    hatch.position.z = ZB - .03;
     g.add(hatch);
-    ctx.dims = { outward: new THREE.Vector3(0, 0, -1), inDist: COLLAR_START + 1.5, outDist: 1.3 };
+    const up = sign('Knoten');
+    up.position.set(0, HATCH_R + .28, ZB - .02); up.rotation.y = Math.PI;
+    g.add(up);
+
+    ctx.dims = { outward: new THREE.Vector3(0, 0, -1), inDist: ZB, outDist: 1.3 };
     ctx.walk = [
-      [cylR('z', [0, 0, 1.2], 1.45, 1.05)],
-      [cylR('z', [0, 0, -.35], .92, .55)],
+      [cylR('z', [0, 0, 1.2], 1.4, 1.05)],
+      [cylR('z', [0, 0, -.35], .9, .55)],
     ];
     ctx.profile = { fov: 80 };
 
-    /* Handläufe: Bügel, die längs auf den Pfosten sitzen — wie an jedem
-       ISS-Modul. Quer durchs Fenster würden sie nur die Aussicht zerschneiden. */
-    const UPV = new THREE.Vector3(0, 1, 0);
-    for (let i = 0; i < 6; i += 2) {
-      const aTop = corner(i, R1, Z1), aBot = corner(i, R2, Z2);
-      const p1 = aTop.clone().lerp(aBot, .34);
-      const p2 = aTop.clone().lerp(aBot, .66);
-      const mid = p1.clone().lerp(p2, .5);
-      const inward = mid.clone().setZ(0).normalize().multiplyScalar(-.075);
-      const axis = p2.clone().sub(p1).normalize();
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.027, .027, p1.distanceTo(p2), 8), frameMat);
-      bar.position.copy(mid).add(inward);
-      bar.quaternion.setFromUnitVectors(UPV, axis);
-      g.add(bar);
-      for (const p of [p1, p2]) {
-        const stud = new THREE.Mesh(new THREE.CylinderGeometry(.017, .017, .085, 6), frameMat);
-        stud.position.copy(p).add(inward.clone().multiplyScalar(.5));
-        stud.quaternion.setFromUnitVectors(UPV, inward.clone().normalize());
-        g.add(stud);
-      }
+    /* Auf einer Kragenfläche: die Robotik-Arbeitsstation wie in der echten
+       Cupola — zwei Laptops und die beiden Steuerknüppel für den Greifarm. */
+    const faceAt = (i, u, v, inset) => {
+      // Punkt auf Kragenfläche i: u quer (0…1), v längs (0 = Ring, 1 = Rückwand)
+      const p = corner(i, R1, 0).lerp(corner(i + 1, R1, 0), u);
+      p.multiplyScalar(1 - inset / (R1 * .866));
+      p.z = Z1 + (ZB - Z1) * v;
+      return p;
+    };
+    const faceNormal = i => { const a = (i + .5) * TAU / 6 + Math.PI / 6; return new THREE.Vector3(-Math.cos(a), -Math.sin(a), 0); };
+    const mount = (obj, i, u, v, inset = .02) => {
+      const n = faceNormal(i);
+      obj.position.copy(faceAt(i, u, v, inset));
+      const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1).cross(n).normalize(), new THREE.Vector3(0, 0, 1), n);
+      obj.quaternion.setFromRotationMatrix(m);
+      g.add(obj);
+      return obj;
+    };
+    const RWS = 2;                     // Fläche mit der Arbeitsstation
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(.9, .42, .03), O.arm);
+    mount(panel, RWS, .5, .66, .03);
+    for (const u of [.28, .72]) {
+      const lp = laptop(u < .5 ? 0 : 1);
+      mount(lp, RWS, u, .2, .02);
+      lp.scale.setScalar(1.15);
     }
-
-    /* Arbeitsbildschirm an einem Rahmen, wie in der echten Cupola */
-    const scr = screen(.40, .26, .5);
-    const anchor = corner(1, R1, Z1).lerp(corner(1, R2, Z2), .42);
-    scr.position.copy(anchor).addScaledVector(anchor.clone().setZ(0).normalize(), -.14);
-    scr.lookAt(0, 0, 1.2);
-    g.add(scr);
+    for (const u of [.25, .75]) {
+      const stick = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(.14, .14, .06), O.black); stick.add(base);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.015, .018, .12, 8), O.arm);
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = .09; stick.add(shaft);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(.03, 12, 8), O.black); knob.position.z = .16; stick.add(knob);
+      mount(stick, RWS, u, .64, .06);
+    }
+    const scr = screen(.34, .2, .5);
+    mount(scr, RWS, .5, .42, .05);
     ctx.screens = [scr];
 
-    /* Gedimmtes Licht — wer hinaussehen will, macht die Lampen aus */
+    /* Handläufe längs auf den übrigen Flächen, Leuchtfelder nahe der Rückwand */
     for (let i = 0; i < 6; i++) {
-      const a = i * TAU / 6;
-      const led = new THREE.PointLight(0xd8e4f2, .34, 3.0, 2);
-      led.position.set(Math.cos(a) * R1 * .8, Math.sin(a) * R1 * .8, Z1 + .3);
+      if (i !== RWS) { const hr = handrail(.7); mount(hr, i, .5, .5, .01); }
+      const led = ledPanel(.45, .08);
+      mount(led, i, .5, .9, .02);
+    }
+    /* Kabel entlang zweier Kanten, ein Staubeutel, die Kamera schwebt am Fenster */
+    g.add(cableRun(corner(3, R1 * .96, Z1 + .1), corner(3, R1 * .96, ZB - .1), 3));
+    const bag = stowageBag(.38, .28, .22, true);
+    mount(bag, 4, .5, .55, .02);
+    const cam = camera();
+    cam.position.set(.72, -.62, -.55);
+    cam.lookAt(1.3, -1.1, -1.7);
+    cam.rotateY(Math.PI);
+    g.add(cam);
+    ctx.floaters = [cam];
+
+    /* Gedimmtes Licht — wer hinaussehen will, macht die Lampen aus */
+    for (let i = 0; i < 3; i++) {
+      const a = i * TAU / 3;
+      const led = new THREE.PointLight(0xfff0dc, .45, 3.2, 2);
+      led.position.set(Math.cos(a) * R1 * .7, Math.sin(a) * R1 * .7, ZB - .35);
       g.add(led);
     }
     g.add(new THREE.AmbientLight(0x2a3442, .45));
@@ -629,10 +709,8 @@ const ROOMS = {
     const earthGlow = new THREE.DirectionalLight(0xbcd6f5, 2.2);
     earthGlow.position.set(0, -4, -6);
     g.add(earthGlow, earthGlow.target);
-    ctx.earthGlow = earthGlow;
 
-    /* Blickrichtung: 33° neben dem Nadir — dann liegt der Erdhorizont im Bild */
-    ctx.window = { mesh: centre, dir: new THREE.Vector3(0, -0.55, -0.84).normalize(), wide: true };
+    ctx.window = { mesh: centre, wide: true };
     ctx.camera = { pos: new THREE.Vector3(0, 0, .45), look: new THREE.Vector3(0, -1.6, -4.0) };
     return g;
   },
@@ -650,7 +728,9 @@ const ROOMS = {
 
     const dark = !!def.dark;
     const LEN = clamp(4.5 + n * 0.5, 5, 11), RAD = 2.4;
-    g.add(shell(LEN, RAD, M, { color: dark ? 0x4a4e52 : 0xdde3e6, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    g.add(shell(LEN, RAD, M, { color: dark ? 0x6a6e72 : 0xeef0ee, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ceiling', 'ends'], seed: n + 5,
+      neg: { to: ports.nearName, laptop: 2 }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
     ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
     ctx.walk = [[cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.82], [BIG, BIG, .82])]];
 
@@ -718,7 +798,9 @@ const ROOMS = {
   tower(st, ctx, modId, g, slots, ports = {}) {
     const M = mats();
     const RAD = 3.1, LEN = 8.5;
-    g.add(shell(LEN, RAD, M, { color: 0xc8d2d8, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    g.add(shell(LEN, RAD, M, { color: 0xe4e8ea, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ceiling', 'ends'], seed: 31,
+      neg: { to: ports.nearName, laptop: 2 }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
     ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
     ctx.walk = [[cylR('x', [0, 0, 0], RAD - .5, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -1.15], [BIG, BIG, 1.15])]];
     ctx.anchors = [];
@@ -837,7 +919,9 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 6.4, RAD = 2.3;
-    g.add(shell(LEN, RAD, M, { color: 0xe8ecef, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    g.add(shell(LEN, RAD, M, { color: 0xf4f4f2, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ceiling', 'upper', 'ends'], bags: 2, seed: 41,
+      neg: { to: ports.nearName, laptop: 1 }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
     ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
     ctx.walk = [
       [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.8], [BIG, BIG, .8])],
@@ -920,7 +1004,9 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 6.0, RAD = 2.4;
-    g.add(shell(LEN, RAD, M, { color: 0xb4bcc2, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    g.add(shell(LEN, RAD, M, { color: 0xd4d8da, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ends'], seed: 51,
+      neg: { to: ports.nearName, laptop: 1 }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
     ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
     ctx.walk = [
       [cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.9], [BIG, BIG, .8])],
@@ -987,17 +1073,20 @@ const ROOMS = {
   },
 
   /* ══ FRACHTSCHLEUSE ══ */
-  cargo(st, ctx) {
+  cargo(st, ctx, modId, ports = {}) {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 5.6, RAD = 2.2;
-    g.add(shell(LEN, RAD, M, { color: 0xc6ccd0, axis: 'z', ends: { neg: 'open', pos: 'port' } }));
+    g.add(shell(LEN, RAD, M, { color: 0xe0e2e2, axis: 'z', ends: { neg: 'open', pos: 'port' } }));
+    dressModule(g, { len: LEN, rad: RAD, axis: 'z', zones: ['ceiling', 'upper', 'ends'], bags: 6, seed: 61,
+      pos: { to: ports.nearName, laptop: 1 } });
     /* Stirnwand mit Bullauge: durch die Luke sieht man hinaus ins All */
     const PORT_Y = -.5, PORT_R = .3;
     const endShape = new THREE.Shape(); endShape.absarc(0, 0, RAD, 0, TAU, false);
     const endHole = new THREE.Path(); endHole.absarc(0, PORT_Y, PORT_R, 0, TAU, true); endShape.holes.push(endHole);
+    const endTex = panelTexture().clone(); endTex.needsUpdate = true; endTex.repeat.set(.45, .45);
     const endWall = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40),
-      new THREE.MeshStandardMaterial({ color: 0xc3c9cd, roughness: .8, metalness: .15, side: THREE.DoubleSide }));
+      new THREE.MeshStandardMaterial({ map: endTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide }));
     endWall.position.z = -LEN / 2;
     g.add(endWall);
     const outer = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40), M.hull);
@@ -1139,42 +1228,8 @@ function tunnel(len, M) {
   return g;
 }
 
-/** Helle Wandpaneele mit Fugen, Nieten und Beschriftungsfeldern. */
-let _panelTex = null;
-function panelTexture() {
-  if (_panelTex) return _panelTex;
-  const c = document.createElement('canvas');
-  c.width = c.height = 512;
-  const x = c.getContext('2d');
-  x.fillStyle = '#dcdedb'; x.fillRect(0, 0, 512, 512);
-  const img = x.getImageData(0, 0, 512, 512);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = (Math.random() - .5) * 6;
-    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
-  }
-  x.putImageData(img, 0, 0);
-  const cells = [[0, 0, 256, 256], [256, 0, 256, 128], [256, 128, 256, 128], [0, 256, 128, 256], [128, 256, 384, 256]];
-  for (const [px, py, w, h] of cells) {
-    x.strokeStyle = 'rgba(80,86,92,.55)'; x.lineWidth = 3; x.strokeRect(px + 2, py + 2, w - 4, h - 4);
-    x.strokeStyle = 'rgba(255,255,255,.5)'; x.lineWidth = 1; x.strokeRect(px + 5, py + 5, w - 10, h - 10);
-    x.fillStyle = 'rgba(90,96,102,.5)';
-    for (const [rx, ry] of [[px + 12, py + 12], [px + w - 12, py + 12], [px + 12, py + h - 12], [px + w - 12, py + h - 12]]) {
-      x.beginPath(); x.arc(rx, ry, 3, 0, 7); x.fill();
-    }
-  }
-  // Klettstreifen und Beschriftungsfelder, wie an den ISS-Wänden
-  x.fillStyle = 'rgba(120,124,128,.35)'; x.fillRect(30, 180, 90, 14); x.fillRect(300, 60, 120, 10); x.fillRect(170, 420, 140, 12);
-  x.fillStyle = 'rgba(60,110,170,.55)'; x.fillRect(290, 180, 60, 18);
-  x.fillStyle = 'rgba(210,160,50,.6)'; x.fillRect(40, 320, 50, 8);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
-  return (_panelTex = t);
-}
-
 /** Der Knoten: ein Würfel mit bis zu sechs Luken, wie Unity auf der ISS. */
-function buildNode(ports, M) {
+function buildNode(ports, M, names = {}) {
   const g = new THREE.Group();
   const S = NODE_H;
   const tex = panelTexture();
@@ -1205,6 +1260,31 @@ function buildNode(ports, M) {
       const bar = new THREE.Mesh(new THREE.BoxGeometry(.9, .07, .07), M.metal);
       bar.position.copy(door.position).addScaledVector(inward, .05); bar.rotation.fromArray(rot);
       g.add(bar);
+    }
+    /* Ausstattung je Wand in Wandkoordinaten: x quer, y hoch, +z in den Raum */
+    const fg = new THREE.Group();
+    fg.position.fromArray(pos); fg.rotation.fromArray(rot);
+    g.add(fg);
+    if (open && names[key]) {
+      const sg = sign(names[key]);
+      sg.position.set(0, HATCH_R + .34, .03);
+      fg.add(sg);
+    }
+    if (key[1] !== 'y') {
+      const bag = stowageBag(.5, .36, .26, key === '-x');
+      bag.position.set(-1.3, -1.28, .01); bag.rotation.z = .06;
+      fg.add(bag);
+      const v = vent(.42, .24); v.position.set(1.3, 1.35, .02);
+      fg.add(v);
+      if (key === '+x' || key === '-z') {
+        const lp = laptop(key === '+x' ? 0 : 1);
+        lp.position.set(1.32, -.15, .01);
+        fg.add(lp);
+      } else {
+        const b2 = stowageBag(.36, .5, .24, true);
+        b2.position.set(1.3, -1.15, .01);
+        fg.add(b2);
+      }
     }
     // Handläufe beiderseits jeder Luke
     for (const sgn of [-1, 1]) {
@@ -1375,7 +1455,7 @@ export class Interior {
 
   _clearBuild() {
     this.anchors = []; this.screens = []; this.regions = []; this.sources = []; this.tunnels = [];
-    this.spawns = {}; this.profiles = { node: NODE_PROFILE }; this.spinners = []; this.dynamic = [];
+    this.spawns = {}; this.profiles = { node: NODE_PROFILE }; this.spinners = []; this.dynamic = []; this.floaters = [];
     for (const l of this.pool || []) { l.userData.src = null; l.userData.fade = 0; l.intensity = 0; }
   }
 
@@ -1410,7 +1490,8 @@ export class Interior {
       this._addTunnel(ch.dir, NODE_H, cursor, M);
       ids.forEach((id, i) => {
         const ctx = { anchors: [], screens: [] };
-        const ports = { far: i < ids.length - 1 };
+        const short = k => MOD_BY_ID[k]?.short || 'Knoten';
+        const ports = { far: i < ids.length - 1, nearName: i ? short(ids[i - 1]) : 'Knoten', farName: ids[i + 1] ? short(ids[i + 1]) : null };
         const g = buildRoom(id, st, ctx, ports);
         const d = ctx.dims;
         const holder = new THREE.Group();
@@ -1427,7 +1508,9 @@ export class Interior {
       });
     }
 
-    const node = buildNode(nodePorts, M);
+    const nodeNames = {};
+    for (const ch of CHAINS) { const first = ch.ids.find(built); if (first) nodeNames[ch.key] = MOD_BY_ID[first]?.short; }
+    const node = buildNode(nodePorts, M, nodeNames);
     node.name = 'room:node';
     this.root.add(node);
     node.updateMatrixWorld(true);
@@ -1491,6 +1574,7 @@ export class Interior {
     }
     for (const s of ctx.screens || []) this.screens.push({ mesh: s, pos: s.getWorldPosition(new THREE.Vector3()) });
     if (ctx.record) this.spinners.push(ctx.record);
+    for (const f of ctx.floaters || []) this.floaters.push({ obj: f, base: f.position.clone(), q: f.quaternion.clone(), seed: this.floaters.length * 1.7 });
     if (ctx.winFill) this.dynamic.push({ light: ctx.winFill, kind: 'window' });
     if (ctx.camera) {
       const pos = holder.localToWorld(ctx.camera.pos.clone());
@@ -1778,6 +1862,12 @@ export class Interior {
       for (const s of this.screens) if (s.pos.distanceToSquared(this.pos) < 110) s.mesh.userData.draw?.(t, []);
     }
     for (const r of this.spinners) r.rotation.y = t * 3.3;
+    /* Was nicht festgemacht ist, treibt langsam an seiner Leine */
+    for (const f of this.floaters) {
+      f.obj.position.copy(f.base).add(_g.set(Math.sin(t * .23 + f.seed) * .03, Math.sin(t * .17 + f.seed * 2) * .04, Math.cos(t * .19 + f.seed) * .03));
+      f.obj.quaternion.copy(f.q);
+      f.obj.rotateX(Math.sin(t * .13 + f.seed) * .08); f.obj.rotateY(Math.sin(t * .11) * .12);
+    }
 
     // Pflanzen wiegen sich leicht
     let i = 0;
