@@ -8,6 +8,7 @@ import { Stage } from './gfx/renderer.js';
 import { Sky } from './gfx/sky.js';
 import { Exterior } from './gfx/exterior.js';
 import { Interior } from './gfx/interior.js';
+import { loadProps } from './gfx/props.js';
 import { PITCH } from './gfx/station.js';
 import { MOD_BY_ID } from './data/modules.js';
 import { RES_BY_ID } from './data/research.js';
@@ -67,6 +68,7 @@ const app = {
       try { const pre = load(); if (pre?.settings?.quality) quality = pre.settings.quality; } catch {}
       this.stage = new Stage($('#webgl-root'), quality);
 
+      const propsP = loadProps();             // Einrichtung lädt parallel zur Erde
       await step(18, 'Satellitenkarten der Erde werden geladen …');
       const q = this.stage.qualityName;
       this.sky = await Sky.create(this.stage.renderer, {
@@ -88,6 +90,7 @@ const app = {
       if (!st) st = null;
 
       await step(78, 'Station wird zusammengesetzt …');
+      await propsP;
       if (st) this.attach(st);
 
       await step(92, 'Bereit.');

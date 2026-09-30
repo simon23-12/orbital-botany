@@ -18,6 +18,7 @@ import { mats, floorTexture, fabricTexture } from './materials.js';
 import { rackMaterial, panelTexture, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
 import { hasPlantModel } from './plantModels.js';
+import { hasProp, makeProp } from './props.js';
 import { BY_ID as PLANT_BY_ID, stageAt } from '../data/plants.js';
 import { MOD_BY_ID } from '../data/modules.js';
 import { clamp, clamp01, lerp, TAU, rng, hash } from '../core/util.js';
@@ -207,6 +208,7 @@ function shell(len, rad, M, opts = {}) {
   skin.rotation.copy(wall.rotation);
   g.add(skin);
 
+  if (!opts.noFloor) {
   const ft = floorTexture(); ft.repeat.set(len / 1.4, rad);
   const floor = new THREE.Mesh(
     axis === 'x' ? new THREE.BoxGeometry(len, .08, rad * 1.42) : new THREE.BoxGeometry(rad * 1.42, .08, len),
@@ -214,6 +216,7 @@ function shell(len, rad, M, opts = {}) {
   floor.position.y = -rad * .72;
   floor.receiveShadow = true;
   g.add(floor);
+  }
 
   // Spanten
   const nRib = Math.max(2, Math.round(len / 1.3));
@@ -284,7 +287,14 @@ const ROOMS = {
     const M = mats();
     const g = new THREE.Group();
     const LEN = 7.6, RAD = 2.85;
-    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, axis: 'z', ends: { neg: 'open', pos: 'port' }, cozy: true }));
+    const FLOOR = -RAD * .72 + .04;               // Oberkante des Bodens
+    const modeled = hasProp('floor_lounge');
+    g.add(shell(LEN, RAD, M, { color: 0xb9bcb8, axis: 'z', ends: { neg: 'open', pos: 'port' }, cozy: true, noFloor: modeled }));
+    if (modeled) {
+      const fl = makeProp('floor_lounge', { shadows: false });
+      fl.position.y = FLOOR;
+      g.add(fl);
+    }
     dressModule(g, { len: LEN, rad: RAD, axis: 'z', zones: ['ceiling', 'ends'], seed: 21,
       pos: { to: ports.nearName || 'Knoten', extinguisher: true } });
     // Außen hinter der Fensterwand
@@ -323,49 +333,56 @@ const ROOMS = {
     ctx.window = { mesh: glass, dir: new THREE.Vector3(0, -0.80, -0.60).normalize() };
 
     /* Couch */
-    const fab = fabricTexture('#37506b');
-    const couchMat = new THREE.MeshStandardMaterial({ map: fab, color: 0x9fb6cf, roughness: .92, metalness: 0 });
-    const couch = new THREE.Group();
-    const seat = new THREE.Mesh(softBox(2.7, .34, 1.0), couchMat);
-    seat.position.y = .42; seat.castShadow = seat.receiveShadow = true;
-    couch.add(seat);
-    const back = new THREE.Mesh(softBox(2.7, .78, .26), couchMat);
-    back.position.set(0, .78, .44); back.rotation.x = -.14;
-    back.castShadow = true;
-    couch.add(back);
-    for (const s of [-1, 1]) {
-      const arm = new THREE.Mesh(softBox(.24, .5, 1.0), couchMat);
-      arm.position.set(s * 1.32, .55, 0); arm.castShadow = true;
-      couch.add(arm);
+    let couch = makeProp('couch');
+    if (couch) {
+      couch.position.set(0, FLOOR, -1.1);
+      couch.rotation.y = Math.PI;
+      g.add(couch);
+    } else {
+      const fab = fabricTexture('#37506b');
+      const couchMat = new THREE.MeshStandardMaterial({ map: fab, color: 0x9fb6cf, roughness: .92, metalness: 0 });
+      couch = new THREE.Group();
+      const seat = new THREE.Mesh(softBox(2.7, .34, 1.0), couchMat);
+      seat.position.y = .42; seat.castShadow = seat.receiveShadow = true;
+      couch.add(seat);
+      const back = new THREE.Mesh(softBox(2.7, .78, .26), couchMat);
+      back.position.set(0, .78, .44); back.rotation.x = -.14;
+      back.castShadow = true;
+      couch.add(back);
+      for (const s of [-1, 1]) {
+        const arm = new THREE.Mesh(softBox(.24, .5, 1.0), couchMat);
+        arm.position.set(s * 1.32, .55, 0); arm.castShadow = true;
+        couch.add(arm);
+      }
+      for (let i = 0; i < 3; i++) {
+        const cu = new THREE.Mesh(softBox(.82, .16, .82), couchMat);
+        cu.position.set((i - 1) * .88, .62, -.02); cu.rotation.x = -.05;
+        couch.add(cu);
+      }
+      // Kissen
+      for (const s of [-1, 1]) {
+        const k = new THREE.Mesh(softBox(.42, .42, .14),
+          new THREE.MeshStandardMaterial({ map: fabricTexture('#7a5a48'), color: 0xd8b9a0, roughness: .95 }));
+        k.position.set(s * .95, .78, .3); k.rotation.set(-.3, s * .3, s * .2);
+        couch.add(k);
+      }
+      // Füße
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const f = new THREE.Mesh(new THREE.CylinderGeometry(.05, .04, .26, 8), M.metal);
+        f.position.set(sx * 1.2, .13, sz * .36);
+        couch.add(f);
+      }
+      couch.position.set(0, -RAD * .68, -1.1);
+      couch.rotation.y = Math.PI;
+      g.add(couch);
     }
-    for (let i = 0; i < 3; i++) {
-      const cu = new THREE.Mesh(softBox(.82, .16, .82), couchMat);
-      cu.position.set((i - 1) * .88, .62, -.02); cu.rotation.x = -.05;
-      couch.add(cu);
-    }
-    // Kissen
-    for (const s of [-1, 1]) {
-      const k = new THREE.Mesh(softBox(.42, .42, .14),
-        new THREE.MeshStandardMaterial({ map: fabricTexture('#7a5a48'), color: 0xd8b9a0, roughness: .95 }));
-      k.position.set(s * .95, .78, .3); k.rotation.set(-.3, s * .3, s * .2);
-      couch.add(k);
-    }
-    // Füße
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const f = new THREE.Mesh(new THREE.CylinderGeometry(.05, .04, .26, 8), M.metal);
-      f.position.set(sx * 1.2, .13, sz * .36);
-      couch.add(f);
-    }
-    couch.position.set(0, -RAD * .68, -1.1);
-    couch.rotation.y = Math.PI;
-    g.add(couch);
     ctx.couch = couch;
 
     // Decke (Komfortgegenstand)
     if (st.comfort.includes('blanket')) {
       const bl = new THREE.Mesh(new THREE.BoxGeometry(1.1, .07, .95),
         new THREE.MeshStandardMaterial({ map: fabricTexture('#8c4a3a'), color: 0xd4917a, roughness: .98 }));
-      bl.position.set(-.8, .63, -.1); bl.rotation.set(.1, .2, .06);
+      bl.position.set(-.8, hasProp('couch') ? .47 : .63, -.1); bl.rotation.set(.1, .2, .06);
       couch.add(bl);
     }
 
@@ -485,25 +502,29 @@ const ROOMS = {
     }
 
     /* Pflanzenregal an der Seitenwand */
-    const shelf = new THREE.Group();
-    for (let i = 0; i < 2; i++) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(1.5, .04, .3),
-        new THREE.MeshStandardMaterial({ color: 0x6a5a48, roughness: .6 }));
-      b.position.y = i * .5;
-      shelf.add(b);
-      for (let k = 0; k < 3; k++) {
-        const pot = new THREE.Mesh(new THREE.CylinderGeometry(.09, .07, .13, 14),
-          new THREE.MeshStandardMaterial({ color: 0xb08868, roughness: .85 }));
-        pot.position.set((k - 1) * .45, i * .5 + .085, 0);
-        shelf.add(pot);
-        const bush = new THREE.Mesh(new THREE.SphereGeometry(.11, 12, 8),
-          new THREE.MeshStandardMaterial({ color: 0x4e8a46, roughness: .9 }));
-        bush.scale.set(1, .8, 1);
-        bush.position.set((k - 1) * .45, i * .5 + .2, 0);
-        shelf.add(bush);
+    let shelf = makeProp('shelf');
+    if (shelf) shelf.position.set(-2.62, -.62, 1.2);    // Lage wie SHELF_AT in tools/lounge_blender.py
+    else {
+      shelf = new THREE.Group();
+      for (let i = 0; i < 2; i++) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(1.5, .04, .3),
+          new THREE.MeshStandardMaterial({ color: 0x6a5a48, roughness: .6 }));
+        b.position.y = i * .5;
+        shelf.add(b);
+        for (let k = 0; k < 3; k++) {
+          const pot = new THREE.Mesh(new THREE.CylinderGeometry(.09, .07, .13, 14),
+            new THREE.MeshStandardMaterial({ color: 0xb08868, roughness: .85 }));
+          pot.position.set((k - 1) * .45, i * .5 + .085, 0);
+          shelf.add(pot);
+          const bush = new THREE.Mesh(new THREE.SphereGeometry(.11, 12, 8),
+            new THREE.MeshStandardMaterial({ color: 0x4e8a46, roughness: .9 }));
+          bush.scale.set(1, .8, 1);
+          bush.position.set((k - 1) * .45, i * .5 + .2, 0);
+          shelf.add(bush);
+        }
       }
+      shelf.position.set(-2.3, -1.2, 1.2);
     }
-    shelf.position.set(-2.3, -1.2, 1.2);
     shelf.rotation.y = Math.PI / 2;
     g.add(shelf);
 
@@ -1341,9 +1362,13 @@ function mergeStatic(holder) {
   for (const list of groups.values()) {
     if (list.length < 2) continue;
     const geos = [];
+    // Eckfarben nur behalten, wo das Material sie auch liest (modellierte Einrichtung)
+    const keepAttr = list[0].material.vertexColors ? ['position', 'normal', 'uv', 'color'] : ['position', 'normal', 'uv'];
+    // indiziert lassen, wenn es alle sind — spart etwa zwei Drittel der Ecken
+    const indexed = list.every(m => m.geometry.index);
     for (const m of list) {
-      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      const g = m.geometry.index && !indexed ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const name of Object.keys(g.attributes)) if (!keepAttr.includes(name)) g.deleteAttribute(name);
       if (!g.attributes.normal) g.computeVertexNormals();
       if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
       g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));

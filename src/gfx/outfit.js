@@ -9,6 +9,7 @@
  */
 import * as THREE from 'three';
 import { TAU, rng } from '../core/util.js';
+import { makeProp } from './props.js';
 
 const cache = new Map();
 const once = (key, make) => cache.has(key) ? cache.get(key) : (cache.set(key, make()), cache.get(key));
@@ -310,6 +311,8 @@ export function laptop(kind = 0) {
 
 /** Feuerlöscher mit Halterung. Rückseite bei z = 0, steht entlang +Y. */
 export function extinguisher() {
+  const modeled = makeProp('extinguisher');
+  if (modeled) return modeled;
   const O = outfitMats();
   const g = new THREE.Group();
   const bottle = new THREE.Mesh(new THREE.CapsuleGeometry(.07, .34, 6, 14), O.red);

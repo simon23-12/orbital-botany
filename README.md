@@ -99,7 +99,7 @@ src/
   game/      state, sim (Wachstumsmodell), actions, mail
   gfx/       renderer, earth (Atmosphäre & Erde), sky, station, exterior,
              interior (begehbare Station), plantModels (Blender-Pflanzen),
-             plants3d (Rückfall)
+             props (Blender-Einrichtung), plants3d (Rückfall)
   audio/     music (generativ), sfx
   ui/        ui (HUD), panels, icons
 vendor/three/
@@ -124,6 +124,22 @@ blender --background --python tools/plants_blender.py
 
 Im Spiel steht dann je Tablett ein ganzer Bestand — vom Kresseteppich bis zu
 zwei Chilipflanzen. Arten ohne Modell zeichnet weiter `plants3d.js`.
+
+Auch die Einrichtung der Lounge kommt aus Blender: `tools/lounge_blender.py`
+baut die Couch (Keder, durchgesessene Sitzkissen, Knopfheftung, Haltegurte),
+das Wandregal mit sechs Zimmerpflanzen (Efeutute, Bogenhanf, Grünlilie,
+Ufopflanze, Echeverie, Schwertfarn) samt Gummiseilen gegen die
+Schwerelosigkeit, den Feuerlöscher mit Manometer, Schlauch und Halterung —
+er hängt in jedem Modul — und den verschraubten Bodenbelag mit
+Lüftungsgittern und Leitlicht. Die Umgebungsverdeckung wird mit Cycles in die
+Eckfarben gebacken. Ausgabe nach `assets/props/`:
+
+```bash
+blender --background --python tools/lounge_blender.py
+```
+
+Ohne Blender-Programm geht es auch mit dem Python-Modul (`pip install bpy`).
+Fehlt das Paket, baut das Spiel die alten, einfachen Formen.
 
 ### Steuerung
 
