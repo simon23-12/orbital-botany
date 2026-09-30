@@ -361,19 +361,30 @@ function pickPlant(app, slot, UI) {
     if (mod?.dark) return p.archetype === 'fungus';
     return p.archetype !== 'fungus';
   });
-  let html = `<h2>Was soll auf diesen Platz?</h2><p>Tablett ${TRAY_AREA} m² in ${mod?.name}. Saatgut wird verbraucht.</p><div class="pick" style="margin-top:1rem">`;
+  const noPad = st.substrate < 1;
+  let html = `<h2>Was soll auf diesen Platz?</h2><p>Tablett ${TRAY_AREA} m² in ${mod?.name}. Saatgut und ein Substratpad werden verbraucht.</p>`;
+  if (noPad) {
+    /* Ohne Pad ist jede Kultur gesperrt — das muss oben stehen, nicht unter der Liste. */
+    const coming = st.orders.filter(o => !o.done && o.items.substrate);
+    const eta = coming.length ? Math.min(...coming.map(o => o.arrivesAt)) - Date.now() : 0;
+    html += `<div class="hint hint--amber" style="margin-top:1rem">${icon('alert')}<div><b>Keine Substratpads mehr.</b> Jede Kultur braucht ein Pad, deshalb ist gerade nichts wählbar.
+      ${coming.length ? `Nachschub dockt in ${dur(Math.max(0, eta), { short: true })} an.` : `<br><button class="btn btn--sm" data-shop style="margin-top:.5rem">${icon('box')}Substratpads bestellen</button>`}</div></div>`;
+  }
+  html += `<div class="pick" style="margin-top:1rem">`;
   for (const p of avail) {
     const have = st.seeds[p.id] || 0;
     const locked = p.level > st.level;
-    const dis = locked || have < 1 || st.substrate < 1;
+    const dis = locked || have < 1 || noPad;
     html += `<button class="pickitem" data-p="${p.id}" ${dis ? 'disabled' : ''}>
       <span class="pickitem__ic">${plantSvg(p, .9, 1, p.id, 3)}</span>
       <span class="pickitem__m"><b>${esc(p.name)}</b><span>${locked ? 'ab Stufe ' + p.level : `${have} Samen · ${(cycleMs(p) / HOUR).toFixed(0)} h · DLI ${p.dli}`}</span></span>
     </button>`;
   }
-  html += `</div><p style="margin-top:1rem;font-size:.8rem;color:var(--ink-faint)">Substratpads vorrätig: <b>${st.substrate}</b>${st.substrate < 1 ? ' — im Katalog nachbestellen!' : ''}</p>`;
+  html += `</div>`;
+  if (!noPad) html += `<p style="margin-top:1rem;font-size:.8rem;color:var(--ink-faint)">Substratpads vorrätig: <b>${st.substrate}</b></p>`;
   UI.modal(html, {
     onMount(root) {
+      root.querySelector('[data-shop]')?.addEventListener('click', () => { UI.closeModal(); UI.open('shop', 'Verbrauch'); });
       for (const b of $$('.pickitem', root)) b.addEventListener('click', () => {
         const r = A.plantSeed(st, slot.id, b.dataset.p);
         if (r.ok) {
