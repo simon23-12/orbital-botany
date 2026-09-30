@@ -98,7 +98,8 @@ src/
   data/      plants, modules, research, shop, mails   ← Inhalte
   game/      state, sim (Wachstumsmodell), actions, mail
   gfx/       renderer, earth (Atmosphäre & Erde), sky, station, exterior,
-             interior (begehbare Station), plants3d
+             interior (begehbare Station), plantModels (Blender-Pflanzen),
+             plants3d (Rückfall)
   audio/     music (generativ), sfx
   ui/        ui (HUD), panels, icons
 vendor/three/
@@ -111,6 +112,18 @@ sie sich mit `tools/earth_textures.py` aus den Originalen.
 Wer eigene Pflanzen hinzufügen will: `src/data/plants.js`. Ein Eintrag mit
 echten Werten für `days`, `dli`, `water`, `temp`, `ph` reicht — den Rest macht
 die Simulation.
+
+Die Pflanzen bis Stufe 5 sind in Blender modelliert: `tools/plants_blender.py`
+baut jede Art aus ihrer echten Wuchsform (Keimblätter, Blattstellung und
+-umriss, Blüten, Früchte) in mehreren Wachstumsschritten und drei Varianten
+und schreibt sie nach `assets/plants/`. Neu erzeugen:
+
+```bash
+blender --background --python tools/plants_blender.py
+```
+
+Im Spiel steht dann je Tablett ein ganzer Bestand — vom Kresseteppich bis zu
+zwei Chilipflanzen. Arten ohne Modell zeichnet weiter `plants3d.js`.
 
 ### Steuerung
 

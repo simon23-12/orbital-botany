@@ -17,6 +17,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
 import { rackMaterial, panelTexture, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
+import { hasPlantModel } from './plantModels.js';
 import { BY_ID as PLANT_BY_ID, stageAt } from '../data/plants.js';
 import { MOD_BY_ID } from '../data/modules.js';
 import { clamp, clamp01, lerp, TAU, rng, hash } from '../core/util.js';
@@ -1742,8 +1743,8 @@ export class Interior {
       const key = s.id;
       const p = s.plant ? PLANT_BY_ID[s.plant] : null;
       const stageIdx = p ? stageAt(p, s.prog).i : -1;
-      const bucket = Math.floor(s.prog * 14);
-      const sig = `${s.plant}|${stageIdx}|${bucket}|${s.dead ? 1 : 0}|${Math.round(s.health * 4)}`;
+      const bucket = Math.floor(s.prog * 28);
+      const sig = `${s.plant}|${stageIdx}|${bucket}|${s.dead ? 1 : 0}|${Math.round(s.health * 4)}|${p && hasPlantModel(p.id) ? 1 : 0}`;
       const cur = this.plants.get(key);
       // Lampe je nach Einstellung
       if (a.tray?.userData.lamp) {

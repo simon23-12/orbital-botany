@@ -1,4 +1,5 @@
-/*  Prozedurale Pflanzenmodelle.
+/*  Prozedurale Pflanzenmodelle — Rückfall für Arten ohne Blender-Modell
+ *  (siehe plantModels.js) und solange dessen Datei noch lädt.
  *
  *  Jede Pflanze wird aus ihrem Archetyp, ihren Farben und dem Wachstumsfortschritt
  *  gebaut. Die Form ist über die Platz-ID deterministisch — dieselbe Pflanze sieht
@@ -7,6 +8,7 @@
 import * as THREE from 'three';
 import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng, hash, clamp, clamp01, lerp, TAU } from '../core/util.js';
+import { isModeled, buildModelBed } from './plantModels.js';
 
 /* ── Blattgeometrie: eine gewölbte, zugespitzte Fläche ── */
 function leafGeometry(len = 1, wid = 0.42, curl = 0.35, serration = 0) {
@@ -372,6 +374,11 @@ function buildWoody(p, g, r, n, scale, stage) {
  * @param {number} stageIdx aktuelle Phase
  */
 export function buildPlant(p, prog, health, seed = 'x', stageIdx = 0) {
+  // In Blender modellierte Arten: ganzer Bestand; bis die Datei da ist, das einfache Modell
+  if (isModeled(p.id)) {
+    const bed = buildModelBed(p, prog, health, seed, health <= .06);
+    if (bed) return bed;
+  }
   const g = new THREE.Group();
   const r = rng(hash(seed + p.id));
   const n = clamp01(Math.pow(prog, 0.72));
