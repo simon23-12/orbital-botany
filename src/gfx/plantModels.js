@@ -51,7 +51,9 @@ let indexP = null;
 const store = new Map();          // id → { state: 'loading'|'ready'|'failed', entry, models }
 
 function loadIndex() {
-  return indexP ||= fetch(BASE + 'index.json').then(r => (r.ok ? r.json() : null)).catch(() => null);
+  // Immer beim Server nachfragen: Nach einem neuen Export soll der Browser nicht
+  // mit einem veralteten Index auf nicht mehr passende Offsets zugreifen.
+  return indexP ||= fetch(BASE + 'index.json', { cache: 'no-cache' }).then(r => (r.ok ? r.json() : null)).catch(() => null);
 }
 
 async function inflate(buf) {
