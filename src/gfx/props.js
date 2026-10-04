@@ -1,6 +1,6 @@
 /*  Modellierte Einrichtung aus Blender (tools/lounge_blender.py).
  *
- *  Couch, Pflanzenregal, Feuerlöscher und Bodenbelag der Lounge liegen als
+ *  Couch, Pflanzenregal, Feuerlöscher, Bodenbelag und die Katze der Lounge liegen als
  *  ein vorkomprimiertes Paket vor. Die Farbe steckt in den Ecken — samt der
  *  in Blender gebackenen Umgebungsverdeckung —, Gewebe, Holz und Bodenbelag
  *  bekommen zusätzlich eine feine Struktur über dreiachsig projizierte UVs.
@@ -125,6 +125,19 @@ function grain() {
   }, 2, true);
 }
 
+/** Kurze, gegeneinander versetzte Haarstriche. 1 Kachel = 4 cm. */
+function strands() {
+  return canvasTex(256, 256, (x, w, h) => {
+    x.fillStyle = '#808080'; x.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2600; i++) {
+      const px = Math.random() * w, py = Math.random() * h, l = 4 + Math.random() * 7, a = Math.PI / 2 + (Math.random() - .5) * .5;
+      const v = Math.random() < .5 ? 40 + Math.random() * 50 : 170 + Math.random() * 60;
+      x.strokeStyle = `rgba(${v},${v},${v},.55)`; x.lineWidth = .8;
+      x.beginPath(); x.moveTo(px, py); x.lineTo(px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke();
+    }
+  }, 25);
+}
+
 /** Feine Körnung eines Verbundbelags. 1 Kachel = 25 cm. */
 function speckle() {
   return canvasTex(256, 256, (x, w, h) => {
@@ -149,6 +162,14 @@ function material(kind) {
         sheen: .3, sheenRoughness: .7, sheenColor: new THREE.Color(0x6a7f98), specularIntensity: .25 });
       break;
     }
+    case 'fur': {
+      // Fell: Zeichnung steckt in den Ecken, die Haarstruktur kommt als feine Strichelung
+      const t = strands();
+      m = new THREE.MeshPhysicalMaterial({ ...c, roughness: .9, bumpMap: t, bumpScale: .45, specularIntensity: .15,
+        sheen: .25, sheenRoughness: .6, sheenColor: new THREE.Color(0x8a8070) });
+      break;
+    }
+    case 'eye': m = new THREE.MeshStandardMaterial({ ...c, roughness: .18, envMapIntensity: .35 }); break;
     case 'wood': m = new THREE.MeshStandardMaterial({ ...c, map: grain(), roughness: .55 }); break;
     case 'floor': {
       const t = speckle();

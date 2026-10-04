@@ -113,17 +113,24 @@ Wer eigene Pflanzen hinzufügen will: `src/data/plants.js`. Ein Eintrag mit
 echten Werten für `days`, `dli`, `water`, `temp`, `ph` reicht — den Rest macht
 die Simulation.
 
-Die Pflanzen bis Stufe 5 sind in Blender modelliert: `tools/plants_blender.py`
+Alle 27 Pflanzen sind in Blender modelliert: `tools/plants_blender.py`
 baut jede Art aus ihrer echten Wuchsform (Keimblätter, Blattstellung und
 -umriss, Blüten, Früchte) in mehreren Wachstumsschritten und drei Varianten
-und schreibt sie nach `assets/plants/`. Neu erzeugen:
+und schreibt sie nach `assets/plants/`. Dazu gehören etwa die Röhrenblüten der
+Sonnenblume in Vogels Spirale mit dem Goldenen Winkel, der Kaffeekeimling als
+„Soldat" mit der Samenschale auf den Keimblättern, der Austernseitling, der
+einen Strohblock vom Myzel durchwachsen lässt, bevor die Hutbüschel kommen,
+oder die Venusfliegenfalle mit roter Fallen-Innenseite und Wimpern am Rand.
+Neu erzeugen:
 
 ```bash
 blender --background --python tools/plants_blender.py
 ```
 
-Im Spiel steht dann je Tablett ein ganzer Bestand — vom Kresseteppich bis zu
-zwei Chilipflanzen. Arten ohne Modell zeichnet weiter `plants3d.js`.
+Im Spiel steht dann je Tablett ein ganzer Bestand — vom Kresseteppich über
+den Weizenhalm-Wald bis zum einzelnen Säulenapfel. Sonnenblumenköpfe und
+Orchideenrispen schauen zum Gang. Solange eine Datei lädt, zeichnet
+`plants3d.js` die einfache Form.
 
 Auch die Einrichtung der Lounge kommt aus Blender: `tools/lounge_blender.py`
 baut die Couch (Keder, durchgesessene Sitzkissen, Knopfheftung, Haltegurte),
@@ -131,7 +138,9 @@ das Wandregal mit sechs Zimmerpflanzen (Efeutute, Bogenhanf, Grünlilie,
 Ufopflanze, Echeverie, Schwertfarn) samt Gummiseilen gegen die
 Schwerelosigkeit, den Feuerlöscher mit Manometer, Schlauch und Halterung —
 er hängt in jedem Modul — und den verschraubten Bodenbelag mit
-Lüftungsgittern und Leitlicht. Die Umgebungsverdeckung wird mit Cycles in die
+Lüftungsgittern und Leitlicht — und die Stoffkatze „Laika": ein Plüschtier aus
+Metabällen mit Nähten, gestickter Nase, Sicherheitsaugen unter halb gesenkten
+Lidern und rotem Halsband, das auf der Fensterbank sitzt. Die Umgebungsverdeckung wird mit Cycles in die
 Eckfarben gebacken. Ausgabe nach `assets/props/`:
 
 ```bash

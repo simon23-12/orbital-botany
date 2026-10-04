@@ -24,6 +24,8 @@ const HX = .22, HZ = .165;
 /**
  * Bestand je Art. grid = [Spalten, Reihen]; scatter = n Pflanzen frei verteilt.
  * Die Dichten folgen üblichen Pflanzabständen, auf 0,25 m² gerechnet.
+ * turn begrenzt die Drehung (Bogenmaß) für Arten mit Schauseite: Sonnenblumenköpfe
+ * und Orchideenrispen sind in Blender zum Gang (lokal +z) ausgerichtet.
  */
 const LAYOUT = {
   kresse:     { scatter: 120, s: [.9, 1.3] },
@@ -39,6 +41,20 @@ const LAYOUT = {
   microtom:   { grid: [2, 2], jit: .015, s: [1.05, 1.2] },
   chili:      { grid: [2, 1], jit: .015 },
   moehre:     { grid: [5, 3], jit: .008, s: [.85, 1.12] },
+  gurke:      { grid: [2, 1], jit: .012 },
+  paprika:    { grid: [2, 1], jit: .015 },
+  kartoffel:  { grid: [2, 2], jit: .015, s: [.88, 1.02] },
+  sonnenblume: { grid: [2, 2], jit: .012, turn: .35 },
+  austernpilz: { grid: [2, 1], jit: .005, turn: .1, s: [.95, 1.02] },
+  orchidee:   { grid: [2, 1], jit: .01, turn: .4 },
+  weizen:     { scatter: 34, s: [.9, 1.08] },
+  mimose:     { grid: [2, 2], jit: .015 },
+  venus:      { grid: [3, 2], jit: .012, s: [.9, 1.12] },
+  wasabi:     { grid: [2, 2], jit: .012 },
+  safran:     { grid: [4, 3], jit: .01 },
+  vanille:    { grid: [2, 1], jit: .008, turn: .5 },
+  kaffee:     { grid: [2, 1], jit: .012 },
+  apfel:      { grid: [1, 1], jit: 0, s: [.98, 1.02], turn: .5 },
 };
 
 /* Abstimmung aufs Raumlicht: Die Tabletts hängen direkt unter hellen LED-Paneelen,
@@ -124,6 +140,8 @@ function material(kind, health) {
   const k = kind + hb;
   let m = matCache.get(k);
   if (m) return m;
+  // Alle Seiten zeichnen: Drehkörper und Schläuche sind nicht überall gleich
+  // herum gewickelt, und three.js dreht die Normale auf der Rückseite selbst um
   const common = { vertexColors: true, metalness: 0 };
   switch (kind) {
     case 'leaf':
@@ -137,13 +155,13 @@ function material(kind, health) {
         sheen: .1, sheenRoughness: .45, sheenColor: new THREE.Color(0xffffff) });
       break;
     case 'fruit':
-      m = new THREE.MeshPhysicalMaterial({ ...common, roughness: .3, clearcoat: .7, clearcoatRoughness: .18 });
+      m = new THREE.MeshPhysicalMaterial({ ...common, roughness: .3, clearcoat: .7, clearcoatRoughness: .18, side: THREE.DoubleSide });
       break;
     case 'root':
-      m = new THREE.MeshStandardMaterial({ ...common, roughness: .55 });
+      m = new THREE.MeshStandardMaterial({ ...common, roughness: .55, side: THREE.DoubleSide });
       break;
     default:
-      m = new THREE.MeshStandardMaterial({ ...common, roughness: .65 });
+      m = new THREE.MeshStandardMaterial({ ...common, roughness: .65, side: THREE.DoubleSide });
   }
   const h = hb / 5;
   if (h < 1) m.color.set(0xffffff).lerp(h < .1 ? DEAD : WILT, (1 - h) * (kind === 'fruit' ? .45 : .8));
@@ -173,7 +191,7 @@ function placements(id, r) {
     }
   }
   const [s0, s1] = L.s || [.9, 1.08];
-  for (const o of out) { o.rot = r() * TAU; o.s = lerp(s0, s1, r()); o.v = Math.floor(r() * 3); o.j = r(); }
+  for (const o of out) { o.rot = L.turn != null ? (r() - .5) * 2 * L.turn : r() * TAU; o.s = lerp(s0, s1, r()); o.v = Math.floor(r() * 3); o.j = r(); }
   return out;
 }
 

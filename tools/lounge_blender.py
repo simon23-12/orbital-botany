@@ -731,6 +731,191 @@ def build_floor():
         pr.add('glow', led, H(0xffe2b8), smooth=False, ao=0)
     return pr
 
+# ───────────────────────── Stoffkatze „Laika" ─────────────────────────
+# Ein Plüschtier, das aufrecht auf der Fensterbank sitzt. Ursprung: Mitte der
+# Standfläche, Blick nach +Z (in den Raum). Etwa 27 cm hoch.
+
+def metaballs(elems, res=.0045, threshold=.6):
+    """Weicher Körper aus Metabällen, in Blender zu einem Netz ausgewertet.
+    elems: [(Mittelpunkt, Halbachsen)] in Spielkoordinaten; die Halbachsen sind
+    die sichtbaren Radien eines einzeln stehenden Elements."""
+    mb = bpy.data.metaballs.new('OB_cat')
+    mb.resolution = mb.render_resolution = res
+    mb.threshold = threshold
+    ob = bpy.data.objects.new('OB_cat', mb)
+    bpy.context.scene.collection.objects.link(ob)
+    k = 1 / math.sqrt(1 - (threshold / 2) ** (1 / 3))     # Feld s·(1−d²/r²)³ mit s = 2
+    for c, r in elems:
+        e = mb.elements.new(type='ELLIPSOID')
+        e.co = g2b(c)
+        e.stiffness = 2.0
+        R = max(r) * k
+        e.radius = R
+        e.size_x, e.size_y, e.size_z = r[0] * k / R, r[2] * k / R, r[1] * k / R
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    V = [Vector((v.co.x, v.co.z, -v.co.y)) for v in me.vertices]
+    F = [tuple(p.vertices) for p in me.polygons]
+    bpy.data.objects.remove(ob); bpy.data.metaballs.remove(mb); bpy.data.meshes.remove(me)
+    b = Block(); b.V, b.F = V, F
+    return b
+
+def build_cat():
+    pr = Prop('cat', ao=.85, ao_dist=.06, occluders=('floor',))
+    Hc = Vector((0, .19, .008))                          # Kopfmitte
+    tilt_h = .12                                         # Kopf leicht schief gelegt
+    def hv(x, y, z):
+        c, s = math.cos(tilt_h), math.sin(tilt_h)
+        return Hc + Vector((x * c - y * s, x * s + y * c, z))
+    tail = []
+    tpts = [(0, .022, -.066), (.045, .017, -.066), (.078, .015, -.03), (.084, .015, .02), (.068, .016, .066), (.036, .018, .088)]
+    for i in range(len(tpts) - 1):
+        a, b = Vector(tpts[i]), Vector(tpts[i + 1])
+        for j in range(4):
+            tail.append((a.lerp(b, j / 4), (i + j / 4) / (len(tpts) - 1)))
+    elems = [
+        (Vector((0, .06, 0)), (.072, .066, .062)),           # Bauch, sitzt breit auf
+        (Vector((0, .112, .004)), (.054, .05, .046)),        # Brust
+        (Vector((0, .145, .006)), (.044, .03, .04)),         # Hals
+        (Hc, (.072, .06, .06)),                              # großer Plüschkopf
+        (hv(0, -.026, .052), (.03, .02, .02)),               # Schnauze
+    ]
+    for s in (-1, 1):
+        elems += [
+            (hv(s * .036, -.018, .03), (.038, .032, .034)),                       # Backe
+            (Vector((s * .056, .042, -.006)), (.036, .04, .052)),                 # Oberschenkel
+            (Vector((s * .052, .013, .052)), (.021, .013, .03)),                  # Hinterpfote
+            (Vector((s * .026, .085, .04)), (.021, .025, .021)),                  # Vorderbein oben
+            (Vector((s * .027, .045, .052)), (.019, .03, .019)),                  # Vorderbein
+            (Vector((s * .028, .015, .062)), (.022, .015, .024)),                 # Vorderpfote
+        ]
+    for p, t in tail:
+        r = lerp(.017, .014, t)
+        elems.append((p, (r, r, r)))
+    body = metaballs(elems)
+    # flache Standfläche: ein Plüschtier ist unten mit Granulat beschwert
+    body.deform(lambda v: Vector((v.x, .004 + (v.y - .004) * .2 if v.y < .004 else v.y, v.z)))
+    # Nähte: Mittelnaht über Gesicht und Bauch, Halsnaht, Naht um die Seiten
+    def seam_d(v):
+        d1 = abs(v.x) if v.z > 0 and (v.y > .15 or v.y < .13) else 9
+        d2 = abs(v.y - .15) if True else 9
+        d3 = abs(v.z + .004) if v.y < .14 and abs(v.x) > .03 else 9
+        return min(d1, d2, d3)
+    nrm = {}
+    def press(v):
+        d = seam_d(v)
+        k = math.exp(-(d / .0022) ** 2)
+        c = Vector((0, v.y, 0)) if v.y < .15 else Hc
+        return v - (v - c).normalized() * .0018 * k
+    body.deform(press)
+
+    def surface(local, inset=.0005):
+        d = (local - Hc).normalized()
+        cand = [v for v in body.V if (v - Hc).length > 1e-6 and (v - Hc).normalized().dot(d) > .985]
+        far = max(cand, key=lambda v: (v - Hc).dot(d))
+        return Hc + d * ((far - Hc).dot(d) - inset), d
+
+    gray, gray2, dark = H(0x7c7064), H(0x8a7e70), H(0x40372e)
+    cream, pink = H(0xf2e8d6), H(0xe8b4b0)
+    def tail_s(p):
+        best, bs = 9, 0
+        for q, t in tail:
+            d = (q - p).length
+            if d < best: best, bs = d, t
+        return best, bs
+    def coat(p, n):
+        c = mix(gray, gray2, .5 + .5 * nz(p, 90, 3))
+        dt, ts = tail_s(p)
+        rel = p - Hc
+        if dt < .022 and p.y < .04 and (p.z < -.04 or abs(p.x) > .06):
+            # aufgedruckte Ringe am Schwanz, helle Spitze
+            c = mix(c, dark, sm(.3, .7, math.sin(ts * TAU * 4)) * .7)
+            c = mix(c, cream, sm(.85, .95, ts))
+        elif rel.length < .085 and p.y > .15:
+            # Stirnstreifen, nur oben und hinten
+            c = mix(c, dark, sm(.2, .6, math.sin(rel.x * TAU / .02 + 1.57)) * sm(.03, .05, rel.y) * .7)
+        elif p.y > .02:
+            c = mix(c, dark, sm(.2, .7, math.sin(p.y * TAU / .028 + p.x * 20)) * sm(.03, -.03, p.z) * .7)
+        # helle Brust und Bauch, Schnauze, Pfoten
+        front = sm(.0, .5, n.z) * sm(.045, .025, abs(p.x)) * (p.y < .14) * (p.y > .02)
+        muz = 0.0
+        r2 = p - hv(0, -.026, .052)
+        if r2.length < .036 and r2.y < .01: muz = sm(.036, .026, r2.length)
+        paw = sm(.024, .012, p.y) * (p.z > .04)
+        c = mix(c, cream, clamp(max(front * .9, muz, paw)))
+        # Nähte etwas dunkler
+        c = c * (1 - .25 * math.exp(-(seam_d(p) / .0016) ** 2))
+        return c
+    pr.add('fur', body, coat)
+
+    # Ohren: dicke Stoffdreiecke, innen rosa
+    for s in (-1, 1):
+        e = lathe([(.03, 0), (.025, .016), (.016, .032), (.007, .042), (1e-4, .045)], 12, cap_bottom=True)
+        e.deform(lambda v: Vector((v.x, v.y, v.z * (.5 if v.z > 0 else .32))))
+        e.deform(lambda v: v - Vector((0, 0, .009 * (1 - v.y / .048) * (abs(v.x) < .019) * (v.z > 0))))
+        M = T(*hv(s * .04, .038, -.004)) @ RZ(-s * .3 + tilt_h) @ RX(.12)
+        e.xf(M)
+        fwd = (M.to_3x3() @ Vector((0, 0, 1))).normalized()
+        c0 = M @ Vector((0, .02, 0))
+        pr.add('fur', e, lambda p, nn, fwd=fwd, c0=c0: mix(gray * .95, pink, sm(.3, .7, nn.dot(fwd)) * sm(.016, .008, abs((p - c0).cross(fwd).length - 0) * .6)))
+    # Sicherheitsaugen: bernsteinfarben mit Schlitz, oben von einem Stofflid
+    # abgeschnitten — daher der ernste Blick
+    for s in (-1, 1):
+        r = .0118
+        eye = lathe([(r, 0), (r * .75, .0024), (r * .4, .0036), (1e-4, .004)], 18, cap_bottom=True)
+        eye.deform(lambda v: Vector((v.x, v.y, min(v.z, r * .28))))
+        loc, d = surface(hv(s * .027, .004, .06), .0016)
+        d = (d + Vector((0, 0, 1.5))).normalized()
+        M = basis(loc, d, UP) @ RY(-s * .12)
+        eye.xf(M)
+        Mi = M.inverted()
+        def ecol(p, nn, Mi=Mi):
+            q = Mi @ p
+            rr = math.hypot(q.x, q.z) / r
+            if abs(q.x) < .0019 * max(0, 1 - (q.z / r) ** 2) ** .5 and rr < .92: return H(0x0a0806)
+            return mix(mix(H(0xf0b028), H(0xc88010), rr), H(0x5a3410), sm(.88, 1, rr))
+        pr.add('eye', eye, ecol, ao=.2)
+        # Lid: ein Stoffwulst über dem Auge, leicht nach innen abfallend
+        lid = [M @ Vector((x * r * 1.1, .002, r * (.32 - .1 * s * x / 1.0) + .0012)) for x in (-1, -.5, 0, .5, 1)]
+        pr.add('fur', tube(lid, [.0018, .0026, .003, .0026, .0018], 6, caps=True), gray * .9)
+    # gestickte Nase und Mund
+    npos, nd = surface(hv(0, -.016, .07), .0004)
+    tri = Block()
+    side = Vector((1, 0, 0)); up = nd.cross(side).normalized()
+    pts = [npos + side * .0075 + up * .003, npos - side * .0075 + up * .003, npos - up * .006]
+    tri.V = [p + nd * .0012 for p in pts] + [npos + nd * .0022]
+    tri.F = [(0, 1, 3), (1, 2, 3), (2, 0, 3)]
+    pr.add('fabric', tri, pink * .8, smooth=True)
+    m0 = npos - up * .006
+    mouth = [m0, m0 - up * .006]
+    for s in (-1, 1):
+        mouth_s = [m0 - up * .006, m0 - up * .008 + side * s * .006, m0 - up * .006 + side * s * .011]
+        pr.add('fabric', tube([surface(q, -.0006)[0] for q in mouth_s], .0007, 4, caps=True), H(0x4a3a34))
+    pr.add('fabric', tube([surface(q, -.0006)[0] for q in mouth], .0007, 4, caps=True), H(0x4a3a34))
+    # Schnurrhaare: Nylonfäden
+    for s in (-1, 1):
+        for k in range(3):
+            a0 = surface(hv(s * .02, -.026 - .004 * k, .06), .0)[0]
+            dirv = Vector((s, .12 - .1 * k, .35)).normalized()
+            pr.add('plastic', tube([a0 + dirv * .06 * t + Vector((0, -.008 * t * t, 0)) for t in (0, .5, 1)],
+                                   [.0005, .0004, .00025], 3, caps=False), H(0xeeeae2), ao=0)
+    # rotes Halsband mit runder Marke
+    yc = .142
+    near = [v for v in body.V if abs(v.y - yc) < .005]
+    ring = []
+    for k in range(33):
+        a = k * TAU / 32
+        dirv = Vector((math.sin(a), 0, math.cos(a)))
+        rad = max((Vector((v.x, 0, v.z - .006)).dot(dirv) for v in near
+                   if Vector((v.x, 0, v.z - .006)).normalized().dot(dirv) > .97), default=.05)
+        ring.append(Vector((0, yc - .003 * math.cos(a), .006)) + dirv * (rad + .0025))
+    pr.add('fabric', tube(ring, .0045, 8, caps=False), H(0xb01e22))
+    tag = lathe([(1e-4, -.0012), (.009, -.0012), (.0095, 0), (.009, .0012), (1e-4, .0012)], 16, cap_bottom=True, cap_top=True)
+    tp = ring[0] + Vector((0, -.011, .004))
+    pr.add('metal', tag.xf(T(tp.x, tp.y, tp.z) @ RX(math.pi / 2 - .2)), H(0xd8b048), ao=.3)
+    pr.add('metal', tube([ring[0], tp + Vector((0, .008, 0))], .0012, 5, caps=False), H(0xb89038), ao=.3)
+    return pr
+
 # ───────────────────────── Blender: Backen und Vorschau ─────────────────────────
 
 def g2b(v): return (v.x, -v.z, v.y)
@@ -803,7 +988,7 @@ def bake_ao(pr):
 MAT_LOOK = {
     'fabric': dict(r=.9), 'metal': dict(r=.35, m=.9), 'paint': dict(r=.3, cc=.6), 'plastic': dict(r=.45),
     'rubber': dict(r=.8), 'ceramic': dict(r=.35), 'clay': dict(r=.85), 'wood': dict(r=.55), 'leaf': dict(r=.5),
-    'stem': dict(r=.6), 'soil': dict(r=1), 'floor': dict(r=.6, m=.15), 'glow': dict(r=.5, e=3),
+    'stem': dict(r=.6), 'soil': dict(r=1), 'fur': dict(r=.85), 'eye': dict(r=.2), 'floor': dict(r=.6, m=.15), 'glow': dict(r=.5, e=3),
 }
 
 def _bmat(name):
@@ -902,7 +1087,8 @@ def pack(pr, buf):
         subs.append({'mat': mat, 'off': off, 'nv': nv, 'ni': len(I), 'wide': wide})
     return {'posScale': 1 / q, 'uvScale': 1 / UV_Q, 'subs': subs}
 
-BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_extinguisher, 'floor_lounge': build_floor}
+BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_extinguisher, 'floor_lounge': build_floor,
+            'cat': build_cat}
 
 def export(ids=None):
     out = os.path.join(ROOT, 'assets', 'props')

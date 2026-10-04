@@ -426,7 +426,14 @@ const ROOMS = {
       lampG.position.set(-1.95, -RAD * .72 + .04, -1.9);
       g.add(lampG);
     }
-    if (st.comfort.includes('cat')) {
+    // Stoffkatze „Laika": sitzt auf der Fensterbank zwischen Scheibe und Rahmen
+    // (Unterkante der Fensteröffnung), den ernsten Blick in den Raum gerichtet
+    const catProp = st.comfort.includes('cat') && makeProp('cat');
+    if (catProp) {
+      catProp.position.set(1.25, -2.92 / 2, -3.565);
+      catProp.rotation.y = -.4;
+      g.add(catProp);
+    } else if (st.comfort.includes('cat')) {
       const cat = new THREE.Group();
       const body = new THREE.Mesh(new THREE.CapsuleGeometry(.09, .12, 6, 12),
         new THREE.MeshStandardMaterial({ map: fabricTexture('#4a4a52'), color: 0xb9b9c4, roughness: 1 }));

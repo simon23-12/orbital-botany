@@ -120,9 +120,11 @@ S_MIN = (-1, 0, 1)
 
 def leaf(g, M, L, W, shape, col, nl=10, S=S_MED, bend=0.0, bend0=0.0, fold=0.0, cup=0.0,
          ruffle=0.0, rfreq=5.0, rph=0.0, twist=0.0, pucker=0.0, pfreq=3.0, pleat=0.0, notch=0.0,
-         mat='leaf', seed=0.0, cos_rows=True):
+         mat='leaf', seed=0.0, cos_rows=True, sinus=0.0):
     """Blattfläche entlang +Y, Oberseite +Z. shape(t) = halbe Breite / W.
-    Zeilen liegen an Basis und Spitze dichter, damit runde Enden rund bleiben."""
+    Zeilen liegen an Basis und Spitze dichter, damit runde Enden rund bleiben.
+    sinus > 0 zieht die Mitte des Blattgrunds nach vorn (herzförmiger Grund);
+    der Stielansatz liegt dann bei y = sinus · L."""
     rows, cols = [], []
     ts = [(.5 - .5 * math.cos(math.pi * i / nl)) if cos_rows else i / nl for i in range(nl + 1)]
     m = Vector((0, 0, 0))
@@ -149,6 +151,8 @@ def leaf(g, M, L, W, shape, col, nl=10, S=S_MED, bend=0.0, bend0=0.0, fold=0.0, 
             y = 0.0
             if notch:
                 y = -notch * L * (1 - abs(s)) ** 2 * sm(.55, 1, t)
+            if sinus:
+                y += sinus * L * (1 - abs(s)) ** 1.5 * (1 - sm(0, .5, t))
             if twist:
                 a = twist * t; c, sn = math.cos(a), math.sin(a)
                 x, z = x * c - z * sn, x * sn + z * c
@@ -1131,6 +1135,1294 @@ def build_moehre(p, R):
         lathe(g, Matrix.Identity(4), prof, col, sides=10, mat='root')
     return g
 
+# ── Gemeinsame Bausteine der späteren Arten ──
+
+def stake(g, P, h, r=.0024, col=H(0xb89a68)):
+    """Pflanzstab aus Bambus mit angedeuteten Knoten."""
+    pts = [P + UP * (h * i / 6) for i in range(7)]
+    tube(g, pts, [r * (1.12 if i % 3 == 0 and 0 < i < 6 else 1) for i in range(7)], const(col), sides=5, cap=True)
+
+def palmate(g, M, L, lobes, shape, lc, seed=0.0, **kw):
+    """Handförmiges Blatt aus Lappen, die vom Stielansatz ausstrahlen.
+    lobes = [(Winkel in der Blattebene, Länge, Breite)]; der Mittellappen liegt oben."""
+    order = sorted(lobes, key=lambda q: -abs(q[0]))
+    for k, (ang, l, w) in enumerate(order):
+        Mk = M @ Matrix.Translation(Vector((0, 0, .0004 * k))) @ Matrix.Rotation(ang, 4, 'Z')
+        leaf(g, Mk, L * l, L * w, shape, lc, seed=seed + ang, **kw)
+
+def tendril(g, P, d, L, col, turns=3.5, r=.0035):
+    """Ranke: erst gestreckt, dann zur Spirale gewunden."""
+    side = d.cross(UP)
+    if side.length < 1e-4: side = Vector((1, 0, 0))
+    side.normalize(); up2 = side.cross(d).normalized()
+    pts, n = [], 16
+    for i in range(n + 1):
+        t = i / n
+        c = sm(.35, 1, t)
+        a = turns * TAU * c
+        pts.append(P + d * L * (t - .55 * c * t) + (side * (math.cos(a) - 1) + up2 * math.sin(a)) * r * c)
+    tube(g, pts, [.00065 * (1 - .5 * i / n) for i in range(n + 1)], col, sides=3)
+
+def blob(g, M, r, col, sides=8, mat='root', sq=1.0, deform=None):
+    """Kleines Ellipsoid (Knolle, Knospe, Beere)."""
+    prof = [(max(r * math.sin(math.pi * v), 1e-5), -r * math.cos(math.pi * v) * sq) for v in (0, .15, .32, .5, .68, .85, 1)]
+    lathe(g, M, prof, col if callable(col) else const(col), sides=sides, mat=mat, deform=deform)
+
+def wheel_flower(g, R, M, n, L, W, col, eye, op, shape=sh_round, cup=.2, mat='petal', sepal=H(0x4a8a38)):
+    """Radförmige Krone: n Zipfel, offen von op 0 (Knospe) bis 1."""
+    for k in range(n):
+        a = k * TAU / n
+        leaf(g, M @ basis(Vector((0, 0, 0)), *tilt(a, lerp(.25, 1.4, op))), L, W, shape, col, nl=4, S=S_LOW,
+             cup=cup, bend=.15, mat=mat, seed=k)
+    for k in range(n):
+        leaf(g, M @ basis(Vector((0, -.0008, 0)), *tilt((k + .5) * TAU / n, 1.7)), L * .45, W * .35, sh_lance,
+             const(sepal), nl=2, S=S_MIN)
+    if eye is not None:
+        lathe(g, M, [(.0016, 0), (.0014, .0035), (1e-5, .0055)], const(eye), sides=5, mat='petal')
+
+# ── Kürbisgewächs: Snackgurke ──
+
+CUKE_LOBES = ((0, 1, .52), (-.8, .86, .48), (.8, .86, .48), (-1.6, .62, .44), (1.6, .62, .44), (-2.35, .34, .4), (2.35, .34, .4))
+
+def cucumber_leaf(g, R, base, az, th, L, key, lc, pc):
+    P = arc(base, az, th, .45, L * .85, 4)
+    tube(g, path_pts(P), [.0021, .0019, .0017, .0016, .0015], pc, sides=4)
+    end, d, z = P[-1]
+    dl, zl = tilt(az + R(key + 'r', -.3, .3), 1.35 + R(key + 't', -.12, .12))
+    shp = acuminate(outline(.42, .18, .7), .3)
+    palmate(g, basis(end, dl, zl), L * .6, CUKE_LOBES, shp, lc, seed=R(key) * 7,
+            nl=6, S=S_LOW, cup=.12, bend=.25, pucker=.14, pfreq=4, ruffle=.05, rfreq=2.5)
+
+def cucumber_fruit(g, R, M, s, key):
+    """Snackgurke: schlank, kaum bewarzt, dunkelgrün mit hellen Streifen zur Blütenseite."""
+    L = .1 * s + .006; r = .0115 * s + .0016
+    prof = [(1e-5, 0)] + [(r * math.sin(math.pi * clamp(v * .97 + .015)) ** .28 * (1 - .3 * sm(.85, 1, v)), -L * v)
+                          for v in (.03, .1, .25, .45, .65, .85, .95, .99)] + [(1e-5, -L)]
+    def col(v, k):
+        stripe = sm(.4, 1, v) * (.5 + .5 * math.cos(k * TAU / 5))
+        return mix(mix(H(0x1c4e1e), H(0x2a6a2a), v * .5), H(0x8ab860), stripe * .45)
+    curve = R(key + 'c', -.4, .4)
+    lathe(g, M, prof, col, sides=10, mat='fruit',
+          deform=lambda q, v, a: Vector((q.x * (1 + .04 * math.sin(a * 5) * math.sin(v * 40)) + curve * .02 * v * v, q.y,
+                                         q.z * (1 + .04 * math.sin(a * 5) * math.sin(v * 40)))))
+    return M @ Vector((curve * .02, -L, 0))
+
+def cucumber_flower(g, R, M, op, key):
+    lc = lcol(H(0xe0a008), H(0xffd426), rib=H(0xc89008), rib_w=.12)
+    for k in range(5):
+        a = k * TAU / 5 + R(key, 0, 1)
+        leaf(g, M @ basis(Vector((0, 0, 0)), *tilt(a, lerp(.3, 1.3, op))), .015, .0095, outline(.6, .35, .55), lc,
+             nl=4, S=S_LOW, cup=.35, bend=.35, ruffle=.12, rfreq=1.5, mat='petal', seed=k)
+    lathe(g, M, [(.0025, -.001), (.0022, .002), (1e-5, .004)], const(H(0xd8a010)), sides=6, mat='petal')
+
+def build_gurke(p, R):
+    g = Geo()
+    if p < .02:
+        seed_on_soil(g, R, .009, H(0xeadcb4), (1, .22, .45)); return g
+    u = clamp(p / .1)
+    stemc = lambda t: mix(H(0xb8c890), H(0x6a9a48), t)
+    tip, ph, az = hypocotyl(g, R, u, .035, .0022, stemc, lean=.1)
+    fade = sm(.3, .5, p)
+    if fade < 1:
+        c = .017 + .012 * sm(.05, .25, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .5, outline(.5, .25, .1),
+                   lcol(mix(H(0x5aa048), H(0xb0a850), fade), rib=H(0xa8d090)), nl=6, S=S_MED, cup=.15)
+    if p < .1: return g
+    lc = lcol(H(0x2f7a32), H(0x3c8c3c), rib=H(0x8ab878), rib_w=.05)
+    pc = lambda t: mix(H(0x7a9858), H(0x5a8e44), t)
+    # Stab, an dem die Ranke hochklettert
+    S0 = azv(az + math.pi) * .022
+    stake(g, S0, .55)
+    gy = tip.y
+    pts = [Vector((0, 0, 0)), tip]
+    nodes = []
+    for k in range(10):
+        age = p - (.1 + k * .042)
+        if age <= 0: break
+        gy += .046 * sm(0, .14, age) + .004
+        w = sm(0, 2.5, k)
+        P = Vector((0, gy, 0)).lerp(S0 + azv(az + k * 1.3) * .009 + UP * gy, w)
+        P.y = gy
+        pts.append(P); nodes.append((k, age, P))
+    tube(g, pts, [.0034 * (1 - .45 * i / len(pts)) + .0012 for i in range(len(pts))], stemc, sides=6)
+    fruit_on = []
+    for k, age, P in nodes:
+        gl = grow(age, .2)
+        a = az + k * 2.5 + R(f'a{k}', -.3, .3)
+        L = (.06 + .055 * sm(0, 3, k)) * gl * R(f'l{k}', .88, 1.1) + .008
+        cucumber_leaf(g, R, P, a, lerp(.4, 1.0, sm(0, .25, age)), L, f'l{k}', lc, pc)
+        if k >= 2 and age > .05:
+            tendril(g, P, (azv(a + 2.4) * .8 + UP * .6).normalized(), .05 * grow(age - .05, .15) + .008, pc)
+        if k >= 2 and R(f'f{k}') < .8:
+            fruit_on.append((k, P, a + math.pi))
+    # Seitentrieb aus dem dritten Knoten
+    if p > .4 and len(nodes) > 3:
+        sa = p - .4; sg = grow(sa, .3)
+        a = az + 1.9
+        B = arc(nodes[2][2], a, 1.0, -.4, .14 * sg + .01, 5)
+        tube(g, path_pts(B), [.0024 * (1 - .4 * i / 5) for i in range(6)], stemc, sides=5)
+        for q in (2, 4):
+            if q / 5 > sg + .25: continue
+            cucumber_leaf(g, R, B[q][0], a + q * 1.6, .8, .07 * sg + .01, f'b{q}', lc, pc)
+        if p > .55: fruit_on.append((99, B[3][0], a))
+    # Blüten (rein weiblich, parthenokarp) und die Früchte dahinter
+    if p >= .5:
+        for k, P, a in fruit_on:
+            fs = sm(.56, .9, p + R(f'fo{k}', -.04, .04)) * R(f'fs{k}', .8, 1.08)
+            F = arc(P, a, 1.4, .4, .012, 2)
+            tube(g, path_pts(F), [.0012] * 3, pc, sides=4)
+            fp, fd, fz = F[-1]
+            M = basis(fp, UP, azv(a)) @ Matrix.Rotation(R(f'ft{k}', -.35, .35), 4, 'Z')
+            tipP = cucumber_fruit(g, R, M, fs * .92 + .08, f'c{k}')
+            bloom = sm(.5, .56, p) * (1 - sm(.66, .74, p))
+            if bloom > .05:
+                d = (tipP - fp).normalized()
+                cucumber_flower(g, R, basis(tipP, -d, azv(a)), bloom, f'fl{k}')
+    return g
+
+# ── Nachtschattengewächse: Blockpaprika und Kartoffel ──
+
+def pepper_fruit(g, R, M, s, ripe, key):
+    """Blockpaprika: vier Kammern, breite Schultern, hängt am gebogenen Stiel."""
+    h = .07 * s + .004; r = .033 * s + .002
+    prof = [(1e-5, -h + .006 * s), (r * .45, -h - .001), (r * .8, -h * .95), (r * .96, -h * .78), (r, -h * .45),
+            (r * .99, -h * .18), (r * .9, -h * .03), (r * .55, .001), (r * .22, -.003 * s), (1e-5, -.002 * s)]
+    base = mix(H(0x23581f), H(0x2f6a26), .5)
+    ripe_c = mix(H(0xc8a000), H(0xe0bc00), .6)       # unter den LEDs bleicht helles Gelb aus
+    def col(v, k):
+        c = mix(base, ripe_c, clamp(ripe * 1.3 - (1 - v) * .3))
+        return mix(c, H(0x3a6a20), sm(.92, 1, v) * .6)
+    lathe(g, M, prof, col, sides=16, mat='fruit',
+          deform=lambda q, v, a: Vector((q.x * (1 + .12 * math.cos(4 * a + .4)), q.y + .005 * s * math.cos(4 * a + .4) * sm(.25, 0, v),
+                                         q.z * (1 + .12 * math.cos(4 * a + .4)))))
+    lathe(g, M, [(.0045 * s + .0015, .0005), (.0035 * s + .001, .003), (.0016, .006), (.0013, .014)],
+          const(H(0x3a7a30)), sides=7, mat='stem')
+
+def build_paprika(p, R):
+    g = Geo()
+    if p < .02:
+        seed_on_soil(g, R, .004, H(0xe8d8a8), (1, .3, .85)); return g
+    u = clamp(p / .1)
+    stemc = lambda t: mix(H(0x7a9858), H(0x4f8a40), t)
+    tip, ph, az = hypocotyl(g, R, u, .032, .0018, stemc)
+    fade = sm(.28, .5, p)
+    if fade < 1:
+        c = .014 + .01 * sm(.05, .25, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .24, sh_lance, lcol(mix(H(0x4a9a40), H(0xb0a850), fade), rib=H(0xa0d090)), nl=6)
+    if p < .1: return g
+    lc = lcol(H(0x2a6a32), H(0x357a3d), rib=H(0x80b878), rib_w=.05)
+    fork_y = .15 * R('fy', .92, 1.08)
+    gh = grow(p - .1, .45)
+    top = Vector((R('lx', -.008, .008), tip.y + (fork_y - tip.y) * gh, R('lz', -.008, .008)))
+    tube(g, [Vector((0, 0, 0)), tip, (tip + top) / 2, top], [.0068, .006, .0052, .0045], stemc, sides=7)
+    for k in range(5):
+        age = p - (.1 + k * .045)
+        if age <= 0: continue
+        Pk = tip.lerp(top, (k + 1) / 6)
+        L = (.065 + .03 * sm(0, 2, k)) * grow(age, .25) + .006
+        a = az + k * 2.4
+        A = arc(Pk, a, lerp(.4, 1.1, sm(0, .3, age)), .2, L * .32, 2)
+        tube(g, path_pts(A), [.0013] * 3, stemc, sides=3)
+        b, d, z = A[-1]
+        leaf(g, basis(b, d, z), L, L * .42, acuminate(sh_ovate, .45), lc, nl=10, S=S_MED, bend=.4, fold=.08, cup=-.15,
+             ruffle=.04, rfreq=2, pucker=.06, seed=k)
+    forks = []
+    if p > .3:
+        def branch(P0, a, th, lvl, t0, key):
+            age = p - t0
+            if age <= 0: return
+            gl = grow(age, .3)
+            L = (.13 - .035 * lvl) * gl + .01
+            B = arc(P0, a, th, -th * .45, L, 4)
+            tube(g, path_pts(B), [(.0042 - lvl * .0009) * (1 - .3 * i / 4) for i in range(5)], stemc, sides=5)
+            for q in (2, 3, 4):
+                la = age - q * .02
+                if la <= 0: continue
+                Pq, dq, zq = B[q]
+                Lq = (.085 - .012 * lvl) * grow(la, .22) + .006
+                for s in ((-1, 1) if q == 4 else (1 if q % 2 else -1,)):
+                    aa = a + s * 1.4 + R(f'{key}{q}{s}', -.3, .3)
+                    A = arc(Pq, aa, lerp(.5, 1.15, sm(0, .3, la)), .15, Lq * .3, 2)
+                    tube(g, path_pts(A), [.0012] * 3, stemc, sides=3)
+                    b, d, z = A[-1]
+                    leaf(g, basis(b, d, z), Lq, Lq * .42, acuminate(sh_ovate, .45), lc,
+                         nl=8, S=S_MED, bend=.4, fold=.08, cup=-.15, ruffle=.04, rfreq=2, seed=R(key) + q)
+            forks.append((B[-1][0], key, lvl))
+            if lvl < 1:
+                for s in (-1, 1):
+                    branch(B[-1][0], a + s * .9 + R(key + str(s), -.3, .3), .4, lvl + 1, t0 + .1, key + str(s))
+        for s in (-1, 1):
+            branch(top, az + s * 1.45, .5, 0, .3, 'b' + str(s))
+    # Blüten in den Gabeln, dann schwere, hängende Früchte
+    if p >= .5:
+        for i, (Pf, key, lvl) in enumerate(forks):
+            if R('fk' + key) > (.9 if lvl == 0 else .55): continue
+            a = R('fa' + key, 0, TAU)
+            F = arc(Pf, a, .7, 1.7, .02, 3)
+            tube(g, path_pts(F), [.0014] * 4, stemc, sides=4)
+            fp, fd, fz = F[-1]
+            bloom = sm(.5, .55, p) * (1 - sm(.66, .72, p))
+            if p < .72 and bloom > .05:
+                star_flower(g, R, basis(fp, fd, fz), 6, .011, .0045, lambda t, s: mix(H(0xf2f2e8), H(0xffffff), t),
+                            H(0xd8c860), .8 + .5 * bloom)
+            if p >= .64:
+                s = sm(.64, .9, p) * R('ps' + key, .85, 1.08)
+                if s > .05:
+                    pepper_fruit(g, R, Matrix.Translation(fp + Vector((0, -.004, 0))) @ Matrix.Rotation(R('pt' + key, -.25, .25), 4, 'Z'),
+                                 s, sm(.88, 1, p + R('pr' + key, -.05, .03)), key)
+    return g
+
+def potato_tuber(g, M, r, green=0.0, key=0.0):
+    """Knolle mit flachen Augen; grüne Stellen dort, wo Licht hinkommt."""
+    skin = H(0xc89a5a); hi = H(0xdab27a)
+    def col(v, k):
+        c = mix(skin, hi, .5 + .5 * math.sin(k * 1.7 + v * 5 + key))
+        return mix(c, H(0x8a9a40), green * sm(.5, 1, v))
+    def deform(q, v, a):
+        e = math.exp(-((math.sin(a * 2.5 + key) * .5 + .5 - .9) / .07) ** 2) * math.sin(math.pi * v) * .12
+        return q * (1 - e) + Vector((0, 0, 0))
+    prof = [(max(r * math.sin(math.pi * v) ** .85, 1e-5), -r * .78 * math.cos(math.pi * v)) for v in (0, .12, .28, .45, .6, .75, .88, 1)]
+    lathe(g, M @ Matrix.Diagonal(Vector((1.25, 1, 1, 1))), prof, col, sides=10, mat='root', deform=deform)
+
+def potato_leaf(g, R, base, az, th, L, key, lc, pc):
+    """Unpaarig gefiedert, mit kleinen Zwischenfiedern."""
+    P = arc(base, az, th, .7, L, 8)
+    tube(g, path_pts(P), [.0016 * (1 - .5 * i / 8) + .0005 for i in range(9)], pc, sides=4)
+    shp = acuminate(outline(.42, .12, .45), .25)
+    for i in (2, 4, 6, 8):
+        Pi, d, z = P[i]
+        side = d.cross(z)
+        f = i / 8
+        for sgn in ((-1, 1) if i < 8 else (0,)):
+            dd = (d * .45 + side * sgn).normalized() if sgn else d
+            ll = L * (.24 + .1 * f) * (1.15 if sgn == 0 else 1)
+            leaf(g, basis(Pi, dd, z), ll, ll * .55, shp, lc, nl=8, S=S_LOW, bend=.4, cup=-.2, pucker=.22, pfreq=5,
+                 seed=R(key) * 10 + i + sgn)
+        if 2 < i:
+            Pm, dm, zm = P[i - 1]
+            sm_ = dm.cross(zm)
+            for sgn in (-1, 1):
+                leaf(g, basis(Pm, (dm * .3 + sm_ * sgn).normalized(), zm), L * .07, L * .045, sh_ovate, lc, nl=3, S=S_MIN, bend=.2)
+
+def build_kartoffel(p, R):
+    g = Geo()
+    sink = sm(.1, .5, p)
+    # Pflanzknolle — erst obenauf, später angehäufelt
+    if p < .5:
+        potato_tuber(g, Matrix.Translation(Vector((0, .006 - .02 * sink, 0))) @ Matrix.Rotation(R('ta', 0, TAU), 4, 'Y'),
+                     .016, 0, R('tk', 0, 6))
+    if p < .02: return g
+    u = clamp(p / .14)
+    stemc = lambda t: mix(H(0x8a6a78), H(0x5a8a46), sm(0, .6, t))
+    if p < .14:
+        # Keimtrieb, violett, mit eingerolltem Blattschopf
+        tip, ph, az = hypocotyl(g, R, u, .03, .0026, stemc, lean=.15)
+        blob(g, Matrix.Translation(tip), .004 + .003 * u, H(0x5a8a40), sides=6, mat='leaf')
+        return g
+    az = R('haz', 0, TAU)
+    senesce = sm(.86, 1, p)
+    lc = lcol(mix(H(0x2f6a32), H(0xb0a040), senesce * .75), mix(H(0x3c7a3a), H(0xc8b050), senesce * .75),
+              rib=mix(H(0x7aa868), H(0xc8b880), senesce), rib_w=.05)
+    tops = []
+    for b in range(3):
+        age = p - (.12 + b * .05)
+        if age <= 0: continue
+        gl = grow(age, .4)
+        a = az + b * 2.2
+        th = (.12 if b == 0 else .4) + .35 * senesce
+        Ls = (.3 - .06 * b) * gl * R(f'sl{b}', .9, 1.08) + .02
+        B = arc(azv(a) * .006, a, th, .25 + .2 * senesce, Ls, 7)
+        tube(g, path_pts(B), [.0042 * (1 - .45 * i / 7) + .001 for i in range(8)], stemc, sides=5)
+        for n in range(1, 8):
+            la = age - n * .035
+            if la <= 0: continue
+            Pn = B[n][0]
+            ll = (.11 + .05 * sm(1, 4, n) - .04 * sm(5, 7, n)) * grow(la, .22) + .008
+            potato_leaf(g, R, Pn, a + n * 2.4, lerp(.4, 1.0, sm(0, .25, la)) + .3 * senesce, ll, f'k{b}{n}', lc, stemc)
+        tops.append((B[-1], b))
+    # Trugdolden mit fliederfarbenen Radblüten
+    if .5 <= p < .82:
+        op = sm(.55, .62, p)
+        fade = sm(.74, .82, p)
+        for (Pt, dt, zt), b in tops:
+            if b == 2: continue
+            C = arc(Pt, az + b, .3, .5, .035, 3)
+            tube(g, path_pts(C), [.0012] * 4, stemc, sides=3)
+            end = C[-1][0]
+            for f in range(5):
+                fa = f * TAU / 5 + b
+                fp = end + azv(fa) * .012 + UP * (.004 + .003 * (f % 2))
+                tube(g, [end, fp], [.0007, .0006], stemc, sides=3)
+                fd = (azv(fa) * .5 + UP).normalized()
+                if op < .3 or f == 4:
+                    blob(g, basis(fp, fd, azv(fa)) @ Matrix.Translation(Vector((0, .004, 0))), .003, H(0xb8a0c8), sides=5, mat='petal', sq=1.5)
+                elif fade < .9:
+                    wheel_flower(g, R, basis(fp, fd, azv(fa)), 5, .011 * (1 - .4 * fade), .008, lcol(H(0xc8b0e8), H(0xe8dcf8)),
+                                 H(0xf0c818), op * (1 - fade), shape=outline(.6, .4, .45), cup=.1)
+    # Knollen am Ende der Stolonen, die obersten schauen aus dem Substrat
+    if p > .55:
+        tg = sm(.55, .95, p)
+        for t in range(4):
+            a = az + t * 1.7 + R(f'ka{t}', -.3, .3)
+            r = (.017 - .003 * t) * tg * R(f'kr{t}', .8, 1.1) + .002
+            d = .035 + .015 * t
+            potato_tuber(g, Matrix.Translation(azv(a) * d + UP * (-r * (.35 + .15 * t))) @ Matrix.Rotation(a, 4, 'Y'),
+                         r, .35 * (t == 0) * sm(.8, 1, p), R(f'kk{t}', 0, 6))
+    return g
+
+# ── Korbblütler: Zwergsonnenblume ──
+
+GOLDEN = math.pi * (3 - math.sqrt(5))
+
+def floret(g, P, nrm, r, h, col, mat='petal'):
+    """Einzelne Röhrenblüte als vierseitiges Pyramidchen."""
+    V, C, F = g.part(mat)
+    a = Vector((1, 0, 0)) if abs(nrm.x) < .9 else Vector((0, 0, 1))
+    X = (a - nrm * a.dot(nrm)).normalized(); Y = nrm.cross(X)
+    b = len(V)
+    for k in range(4):
+        an = k * TAU / 4
+        V.append(P + (X * math.cos(an) + Y * math.sin(an)) * r); C.append(col)
+    V.append(P + nrm * h); C.append(col)
+    for k in range(4):
+        F.append((b + k, b + (k + 1) % 4, b + 4))
+
+def sunflower_head(g, R, M, D, op, key, bud_op=1.0):
+    """Korb: Zungenblüten in zwei Kreisen (21 + 13), Röhrenblüten in Vogels
+    Spirale mit dem Goldenen Winkel — die Fibonacci-Spiralen entstehen von selbst."""
+    r = D / 2; dr = r * .56
+    # Hüllblätter
+    for ring, (n, L) in enumerate(((13, r * .55), (13, r * .42))):
+        for k in range(n):
+            a = (k + ring * .5) * TAU / n
+            leaf(g, M @ basis(Vector((math.sin(a), 0, math.cos(a))) * dr * .92 + Vector((0, -dr * .2, 0)), *tilt(a, lerp(.15, 1.25, bud_op) + .5 * op + ring * .15)),
+                 L * lerp(1.5, 1, bud_op), L * .38, acuminate(sh_ovate, .5), lcol(H(0x3a7a32), H(0x4a8a3a)), nl=4, S=S_LOW, cup=.3, bend=.3)
+    if bud_op < .35:
+        blob(g, M @ Matrix.Translation(Vector((0, -dr * .1, 0))), dr * 1.02, H(0x3f7a34), sides=12, mat='leaf', sq=.55)
+        return
+    # Zungenblüten
+    if True:                       # Zungenblüten entfalten sich vor den Röhrenblüten
+        yc = lambda t, s: mix(mix(H(0xe89800), H(0xffbe1a), sm(0, .35, t)), H(0xffd040), sm(.7, 1, t) * .6)
+        for ring, (n, lf) in enumerate(((21, 1.0), (13, .85))):
+            for k in range(n):
+                a = (k + ring * .5) * TAU / n + R(f'{key}z{ring}{k}', -.05, .05)
+                th = lerp(.2, 1.42 + .08 * ring, op)
+                L = (r - dr) * 1.25 * lf * lerp(.5, 1, op)
+                leaf(g, M @ basis(Vector((math.sin(a), 0, math.cos(a))) * dr * .95 + Vector((0, ring * .001, 0)), *tilt(a, th)),
+                     L, L * .3, outline(.5, .35, .35), yc, nl=5, S=S_LOW, cup=.25, bend=.2, ruffle=.08, rfreq=1.5,
+                     notch=.04, mat='petal', seed=ring * 30 + k)
+    # Korbboden
+    lathe(g, M, [(1e-5, -dr * .3), (dr * .9, -dr * .25), (dr, -dr * .05), (dr * .7, dr * .1), (1e-5, dr * .14)],
+          const(H(0x3a2a10)), sides=16, mat='petal')
+    # Röhrenblüten, von außen nach innen aufblühend
+    n = 200
+    for i in range(n):
+        f = math.sqrt((i + .5) / n)
+        a = i * GOLDEN
+        rr = dr * .96 * f
+        y = dr * .14 * (1 - f * f) + .0004
+        P = M @ Vector((math.sin(a) * rr, y, math.cos(a) * rr))
+        nrm = (M.to_3x3() @ Vector((math.sin(a) * f * .5, 1, math.cos(a) * f * .5))).normalized()
+        bloom_f = f > 1 - .45 * op
+        if bloom_f:
+            c = mix(H(0x5a3008), H(0xc88a10), sm(.75, 1, f))
+        else:
+            c = mix(H(0x2a1a08), H(0x4a5a18), sm(.4, 0, f))
+        rf = dr * 1.05 / math.sqrt(n)
+        floret(g, P, nrm, rf, rf * (1.6 if bloom_f else .9), c)
+
+def build_sonnenblume(p, R):
+    g = Geo()
+    if p < .02:
+        leaf(g, basis(Vector((0, .0015, 0)), Vector((1, .05, .2)).normalized(), UP), .011, .0035, sh_ellipse,
+             lambda t, s: mix(H(0x2a2420), H(0xb0b0a8), (abs(s) > .5) * .7), nl=3, S=S_LOW, mat='root', cup=.6)
+        return g
+    u = clamp(p / .12)
+    stemc = lambda t: mix(H(0x8a9a60), H(0x4a8a3a), t)
+    tip, ph, az = hypocotyl(g, R, u, .04, .0026, stemc, lean=.08)
+    fade = sm(.3, .5, p)
+    if fade < 1:
+        c = .018 + .012 * sm(.05, .25, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .48, outline(.45, .3, .2),
+                   lcol(mix(H(0x4a9a40), H(0xb0a850), fade), rib=H(0xa0d090)), nl=6, S=S_MED, cup=.1)
+    if p < .12: return g
+    lc = lcol(H(0x3a7a32), H(0x4c8c3f), rib=H(0x9cc488), rib_w=.05)
+    Hmax = .38 * R('h', .92, 1.06)
+    Hs = tip.y + (Hmax - tip.y) * sm(.12, .8, p) ** 1.25
+    # Stängel neigt den Kopf zum Gang (lokal +z)
+    nod = .55 * sm(.7, .9, p)
+    pts = [Vector((0, 0, 0)), tip]
+    n = 8
+    lean = R('lean', -.03, .03)
+    for k in range(1, n + 1):
+        f = k / n
+        y = tip.y + (Hs - tip.y) * f
+        pts.append(Vector((lean * y, y, nod * .06 * sm(.6, 1, f))))
+    tube(g, pts, [.0055 * (1 - .45 * i / len(pts)) + .0012 for i in range(len(pts))], stemc, sides=7, cap=True)
+    shp = acuminate(serrate(lambda t: math.sin(math.pi * (.15 + .85 * t) ** .8) ** .6, 9, .1), .4)
+    for k in range(1, n):
+        age = p - (.12 + k * .055)
+        if age <= 0: continue
+        gl = grow(age, .25)
+        L = (.075 + .02 * sm(0, 3, k) - .035 * sm(4, 7, k)) * gl + .006
+        a = az + (k * math.pi / 2 if k < 3 else k * 2.4)
+        A = arc(pts[k + 1], a, lerp(.5, 1.0, sm(0, .3, age)), .3, L * .55, 3)
+        tube(g, path_pts(A), [.0016, .0015, .0014, .0013], stemc, sides=4)
+        b, d, z = A[-1]
+        leaf(g, basis(b, d, z) @ Matrix.Translation(Vector((0, -.18 * L, 0))), L, L * .5, shp, lc, nl=10, S=S_MED,
+             bend=.45, cup=-.1, pucker=.18, pfreq=4, seed=k, sinus=.18)
+    # junge Blätter am Scheitel, solange noch keine Knospe sitzt
+    if p < .62:
+        for s in range(3):
+            L = .028 * (1 - sm(.5, .62, p)) + .004
+            leaf(g, basis(pts[-1], *tilt(az + s * 2.1, .35 + .15 * s)), L, L * .45, sh_ovate, lc, nl=5, S=S_LOW, cup=.4, bend=.2)
+    # Knospe, dann der Korb
+    if p >= .55:
+        top = pts[-1]
+        face = (UP * math.cos(.15 + 1.05 * sm(.7, .95, p)) + Vector((0, 0, 1)) * math.sin(.15 + 1.05 * sm(.7, .95, p))).normalized()
+        M = basis(top + face * .006, face, Vector((0, 1, 0)) if abs(face.y) < .95 else Vector((0, 0, -1)))
+        D = (.03 + .085 * sm(.55, .9, p)) * R('hd', .9, 1.08)
+        sunflower_head(g, R, M, D, sm(.84, .95, p), 'h', sm(.76, .86, p))
+    return g
+
+# ── Pilz: Austernseitling auf Strohsubstrat ──
+
+def substrate_block(g, w, d, h, colfn, sides=72, n=5.0):
+    """Block mit fast rechteckigem Grundriss (Superellipse) und gerundeten Kanten."""
+    prof = ([(.9, 0), (.975, .006)] + [(1, lerp(.02, h - .018, i / 8)) for i in range(9)] +
+            [(.985, h - .007), (.93, h - .001)] + [(lerp(.86, .04, i / 7), h + .002 + .001 * math.sin(math.pi * i / 7)) for i in range(8)] +
+            [(1e-4, h + .002)])
+    rows, cols = [], []
+    for sc, y in prof:
+        row = []
+        for k in range(sides):
+            a = k * TAU / sides
+            sa, ca = math.sin(a), math.cos(a)
+            x = math.copysign(abs(sa) ** (2 / n), sa) * w / 2 * sc
+            z = math.copysign(abs(ca) ** (2 / n), ca) * d / 2 * sc
+            P = Vector((x, y, z))
+            # gestopftes Stroh: die Oberfläche beult sich unregelmäßig
+            b = noise.noise(P * 38) * .5 + noise.noise(P * 90 + Vector((3, 1, 2))) * .25
+            P = Vector((x * (1 + .035 * b * sc), y + .004 * b * (y > h * .9), z * (1 + .035 * b * sc)))
+            row.append(P); cols.append(colfn(P))
+        rows.append(row)
+    g.grid('root', rows, cols, closed=True)
+
+def oyster_cap(g, M, Lc, op, top, gill, key):
+    """Muschelförmiger Hut, seitlich am Stiel. Lokal: +Y vom Stiel weg, +Z oben.
+    Jung mit eingerolltem Rand, reif flach und gewellt; Lamellen laufen am Stiel herab."""
+    nl, ns = 7, 10
+    tr, br, tc, bc = [], [], [], []
+    curl = 1 - op
+    for i in range(nl + 1):
+        t = i / nl
+        w = Lc * .58 * math.sin(math.pi / 2 * t) ** .65 * (1 + .2 * t)
+        rowt, rowb = [], []
+        for j in range(ns + 1):
+            s = j / ns * 2 - 1
+            x = s * w
+            y = Lc * t * (1 - .18 * s * s * t)
+            z = Lc * (.16 * (1 - s * s) * math.sin(math.pi * min(t, 1) * .8) - .1 * (1 - sm(0, .35, t)))
+            z -= Lc * .16 * curl * sm(.6, 1, t) ** 2
+            z += Lc * .025 * op * math.sin(s * 3 + key * 3) * sm(.7, 1, t)
+            th = Lc * (.07 * (1 - t) + .012)
+            ridge = Lc * .025 * abs(math.sin(s * 9 + key)) * sm(.05, .2, t) * (1 - sm(.85, 1, t))
+            rowt.append(M @ Vector((x, y, z)))
+            rowb.append(M @ Vector((x, y, z - th - ridge)))
+            tc.append(mix(top, mix(top, H(0xd8d0c0), .5), sm(.6, 1, t) * .6 + .3 * (1 - op) * 0))
+            bc.append(mix(gill, H(0xf4eee0), sm(.3, 1, t) * .5))
+        tr.append(rowt); br.append(rowb)
+    V, C, F = g.part('petal')
+    g.grid('petal', tr, tc)
+    g.grid('petal', br, bc)
+
+def build_austernpilz(p, R):
+    g = Geo()
+    W, Dp, Hb = .17, .25, .1
+    myc = sm(.03, .6, p) * 1.12
+    straw = H(0xb89a50); straw2 = H(0x8a6a30); white = H(0xf2f0e6)
+    def bcol(P):
+        n1 = noise.noise(Vector((P.x * 60, P.y * 160, P.z * 60)))
+        n2 = noise.noise(Vector((P.x * 140 + 3, P.y * 30, P.z * 140)))
+        c = mix(straw, straw2, .5 + .5 * n1)
+        c = mix(c, H(0xd8c070), sm(.3, .7, n2) * .6)
+        patch = noise.noise(Vector((P.x * 18 + 7, P.y * 18, P.z * 18))) * .5 + .5
+        m = sm(-.08, .08, myc - patch * .9 - .05)
+        return mix(c, mix(white, H(0xd4ccb6), .5 + .5 * n1), m * (.7 + .2 * sm(-.3, .5, n2)))
+    substrate_block(g, W, Dp, Hb, bcol)
+    if p < .55: return g
+    # Fruchtstellen: oben, an der Gangseite (+z) und an einer Stirnseite
+    sites = [(Vector((R('sx', -.03, .03), Hb + .002, R('sz', -.05, .04))), UP, 1.0),
+             (Vector((R('fx', -.03, .03), Hb * .55, Dp / 2 + .001)), Vector((0, 0, 1)), .9),
+             (Vector((W / 2 + .001, Hb * .5, R('ex', -.06, .06))), Vector((1, 0, 0)), .7)]
+    prim = sm(.55, .68, p)
+    fruit = sm(.72, .97, p)
+    for si, (S, nrm, wgt) in enumerate(sites):
+        if R(f'site{si}') > .85 and si == 2: continue
+        side = nrm.cross(UP) if abs(nrm.y) < .9 else Vector((1, 0, 0))
+        side.normalize()
+        ncap = 11 + int(R(f'n{si}', 0, 6))
+        for c in range(ncap):
+            a = (c / ncap - .5) * 2.2 + R(f'a{si}{c}', -.2, .2)
+            lay = R(f'l{si}{c}')
+            # Richtung: vom Substrat weg, nach außen gefächert und leicht aufwärts
+            out = (nrm * .8 + side * math.sin(a) * .9 + UP * (.35 + .4 * lay)).normalized()
+            if abs(nrm.y) > .9:
+                out = (azv(c * 2.4 + R(f'o{si}', 0, 6)) * .9 + UP * (.5 + .3 * lay)).normalized()
+            base = S + side * math.sin(a) * .006 + UP * (lay - .5) * .01 * (abs(nrm.y) < .9)
+            size = R(f's{si}{c}', .55, 1.0) * wgt
+            if fruit <= .02:
+                k = prim * size
+                if k > .05:
+                    blob(g, Matrix.Translation(base + out * .004 * k), .0035 * k + .0008,
+                         mix(H(0x4a5060), H(0x8a8a90), R(f'pc{si}{c}')), sides=6, mat='petal')
+                continue
+            Lc = (.014 + .058 * fruit) * size + .004
+            stem_l = .006 + .008 * size
+            tip = base + out * stem_l
+            tube(g, [base, (base + tip) / 2 + UP * .001, tip], [.0042 * size + .001, .0034 * size + .001, .0028 * size + .0008],
+                 const(H(0xeeeae0)), sides=5)
+            dH = (out + UP * .25).normalized()
+            zH = (UP - dH * UP.dot(dH)).normalized()
+            top = mix(mix(H(0x464a56), H(0x857e72), fruit), H(0xa09684), R(f'tc{si}{c}') * .35)
+            oyster_cap(g, basis(tip - dH * .002, dH, zH), Lc, fruit, top, H(0xe6dece), R(f'k{si}{c}', 0, 6))
+    return g
+
+# ── Orchideen: Phalaenopsis ──
+
+def phal_flower(g, R, M, op, key):
+    """Lokal: Blüte schaut nach +Z, +Y ist oben. Drei Sepalen, zwei breite
+    Petalen, dreilappige Lippe mit gelbem Schwiel, Säule in der Mitte."""
+    s = .55 + .45 * op
+    white = lcol(H(0xf4e4ee), H(0xfdf6fa), rib=H(0xe8b8d4), rib_w=.25, rib_fade=.2)
+    def part(a, L, W, shape, col, cup=-.05, bend=-.1, z0=0.0):
+        d = Vector((math.sin(a), math.cos(a), 0))
+        nrm = Vector((0, 0, 1))
+        leaf(g, M @ basis(Vector((0, 0, z0)), (d + nrm * lerp(1.2, .12, op)).normalized(), nrm), L * s, W * s, shape, col,
+             nl=6, S=S_MED, cup=cup, bend=bend, mat='petal', seed=a)
+    part(0, .03, .011, outline(.5, .15, .3), white)
+    for sg in (-1, 1):
+        part(sg * 2.45, .029, .011, outline(.5, .15, .3), white, z0=-.0004)
+        part(sg * 1.3, .03, .022, outline(.55, .1, .05), white, cup=-.1, z0=.0006)
+    lip = lambda t, s2: mix(mix(H(0xd84a90), H(0xffd030), sm(.3, 0, t) * .9), H(0xe03070), sm(.6, 1, t))
+    part(math.pi, .019, .009, lambda t: (.6 + .4 * math.sin(math.pi * t * 2.2) ** 2) * math.sin(math.pi * t) ** .4, lip,
+         cup=.6, bend=.4, z0=.002)
+    lathe(g, M @ Matrix.Rotation(math.pi / 2, 4, 'X'), [(.0025, -.002), (.002, .004), (.0015, .008), (1e-5, .009)],
+          const(H(0xf6eef0)), sides=6, mat='petal')
+
+def build_orchidee(p, R):
+    g = Geo()
+    # Rindenstücke als Substrat
+    for b in range(9):
+        a = b * 2.4 + R('ba', 0, 1); rr = .012 + .03 * R(f'br{b}')
+        sz = R(f'bs{b}', .006, .012)
+        lathe(g, Matrix.Translation(azv(a) * rr + UP * .001) @ Matrix.Rotation(R(f'bt{b}', 0, 3), 4, 'Y') @ Matrix.Rotation(.2, 4, 'X'),
+              [(1e-5, 0), (sz, .001), (sz * .9, .004), (1e-5, .005)], const(mix(H(0x5a3420), H(0x8a5a38), R(f'bc{b}'))),
+              sides=4, mat='root')
+    if p < .03:
+        blob(g, Matrix.Translation(UP * .005), .004, H(0x6aa060), sides=6, mat='leaf'); return g
+    az = R('az', 0, TAU) * 0 + R('az0', -.4, .4) + math.pi / 2
+    lc = lcol(H(0x2a6440), H(0x3a7a4c), rib=H(0x4a8a5a), rib_w=.12, edge=H(0x245a38), edge_w=.3)
+    # distiche, dicke Blätter, fast waagrecht
+    nleaf = 0
+    for i in range(6):
+        age = p - (.03 + i * .11)
+        if age <= 0: break
+        nleaf += 1
+        gl = grow(age, .35)
+        a = az + (i % 2) * math.pi + R(f'a{i}', -.25, .25)
+        L = (.05 + .1 * sm(0, 3, i)) * gl * R(f'l{i}', .9, 1.08) + .006
+        th = lerp(.5, 1.35, sm(0, .3, age)) - .08 * i
+        base = Vector((0, .004 + .003 * i, 0))
+        leaf(g, basis(base, *tilt(a, th)), L, L * .4, outline(.62, .3, .2), lc, nl=9, S=S_MED, cup=.35, bend=.35, fold=.08, seed=i)
+    # Luftwurzeln, silbrig mit grüner Spitze
+    for r in range(5):
+        age = p - (.12 + r * .12)
+        if age <= 0: continue
+        gl = grow(age, .4)
+        a = az + R(f'ra{r}', 0, TAU)
+        L = (.04 + .06 * R(f'rl{r}')) * gl + .004
+        up = r % 3 == 2
+        P = arc(Vector((0, .006, 0)), a, 1.3 if not up else .5, (.5 if not up else -.4) + R(f'rb{r}', -.3, .3), L, 6)
+        pts = [q for q, _, _ in P]
+        if not up:
+            pts = [q if q.y > .003 else Vector((q.x, .003, q.z)) for q in pts]
+        tube(g, pts, [.0028] * 6 + [.0022], lambda t: mix(H(0xb8c4b4), H(0x5a9a4a), sm(.75, 1, t)), sides=6, cap=True)
+    # Blütenrispe: aus der Blattachsel, aufrecht, oben zum Gang (+z) gebogen
+    if p >= .5:
+        sg = sm(.5, .74, p)
+        Ls = .33 * sg * R('sl', .9, 1.06) + .01
+        n = 14
+        pts = []
+        start = Vector((math.sin(az) * .01, .012, math.cos(az) * .01))
+        lean = Vector((R('sx', -1, 1) < 0 and -1 or 1, 0, .45)).normalized()
+        for i in range(n + 1):
+            t = i / n
+            ang = .12 + 1.5 * sm(.4, 1, t) * sg
+            if i == 0:
+                pts.append(start); continue
+            d = UP * math.cos(ang) + lean * math.sin(ang)
+            pts.append(pts[-1] + d * (Ls / n))
+        tube(g, pts, [.0019 * (1 - .4 * i / n) + .0006 for i in range(n + 1)], const(H(0x4a6a3a)), sides=5)
+        nf = 7
+        for f in range(nf):
+            t = .5 + .5 * f / (nf - 1)
+            i = min(n, int(t * n))
+            P = pts[i]
+            fo = sm(.74 + .025 * f, .8 + .025 * f, p) * (1 - sm(.97, 1, p) * 0)
+            if p < .7 or t * sg < .5: continue
+            side = 1 if f % 2 else -1
+            pd = (Vector((0, -.5, .4)) + lean * .3 * side).normalized()
+            fp = P + pd * .012
+            tube(g, [P, fp], [.0008, .0007], const(H(0x6a8a50)), sides=3)
+            if fo < .05:
+                blob(g, basis(fp, Vector((0, 0, 1)), UP) @ Matrix.Translation(Vector((0, .004, 0))),
+                     .0035 + .002 * sm(.68, .76, p), mix(H(0x8aa860), H(0xf0e0e8), sm(.7, .8, p)), sides=6, mat='petal', sq=1.2)
+            else:
+                M = Matrix.Translation(fp + Vector((0, -.006, .008))) @ Matrix.Rotation(side * .25 + lean.x * .3, 4, 'Y') @ Matrix.Rotation(-.15, 4, 'X')
+                phal_flower(g, R, M, fo, f)
+    return g
+
+# ── Süßgras: Zwergweizen 'USU-Apogee' ──
+
+def wheat_ear(g, R, M, L, ripe, key, emerge=1.0):
+    """Ähre: Ährchen wechselständig zweizeilig an der Spindel, grannenlos."""
+    green = H(0x7aa848); gold = H(0xd8b868)
+    col = mix(green, gold, ripe)
+    n = 13
+    tube(g, [M @ Vector((0, 0, 0)), M @ Vector((0, L, 0))], [.0011, .0008], const(mix(H(0x6a9a40), H(0xc8a860), ripe)), sides=4)
+    for i in range(n):
+        t = i / (n - 1)
+        if t > emerge: break
+        sgn = 1 if i % 2 else -1
+        sz = .0034 * (1 - .4 * abs(t - .4) ** 1.5)
+        M2 = M @ Matrix.Translation(Vector((0, L * (.04 + .92 * t), 0))) @ Matrix.Rotation(sgn * .42, 4, 'Z') @ Matrix.Diagonal(Vector((1, 1, .6, 1)))
+        lathe(g, M2, [(1e-5, -.001), (sz * .8, sz * .5), (sz, sz * 1.4), (sz * .6, sz * 2.3), (1e-5, sz * 2.9)],
+              lambda v, k, c=col: mix(c, mix(c, H(0xf0e0b0), .4), sm(.6, 1, v)), sides=5, mat='stem')
+
+def build_weizen(p, R):
+    g = Geo()
+    if p < .02:
+        blob(g, Matrix.Translation(Vector((0, .0016, 0))) @ Matrix.Rotation(R('sa', 0, 3), 4, 'Y') @ Matrix.Rotation(math.pi / 2, 4, 'Z'),
+             .0016, H(0xb8803a), sides=6, sq=2.0); return g
+    az = R('az', 0, TAU)
+    ripe = sm(.8, .97, p)
+    senesce = sm(.75, 1, p)
+    lg = H(0x4f8a3e); lt = H(0x6a9a48)
+    lc = lambda t, s, k=0.0: mix(mix(lg, lt, t), H(0xc8b070), clamp(senesce * 1.2 - (1 - t) * .3 + k))
+    # Keimscheide und erstes Blatt
+    if p < .1:
+        u = p / .1
+        L = .01 + .05 * u
+        tube(g, [Vector((0, 0, 0)), Vector((0, .006 + .006 * u, 0))], [.0012, .001], const(H(0xc8d8a0)), sides=4, cap=True)
+        leaf(g, basis(Vector((0, .008, 0)), *tilt(az, .15 + .3 * u)), L, .0022, sh_linear, lambda t, s: lc(t, s), nl=6, S=S_MIN, bend=.5 * u, twist=.4)
+        return g
+    ntill = 1 + int(sm(.1, .3, p) * (2 + R('nt') * 1.6))
+    Hmax = .37 * R('h', .9, 1.06)
+    elong = sm(.32, .62, p)
+    for k in range(ntill):
+        a = az + k * 2.3
+        lean = 0 if k == 0 else .08 + .06 * k
+        Hc = (.02 + (Hmax - .02) * elong) * (1 - .08 * k)
+        top_d = (UP * math.cos(lean) + azv(a) * math.sin(lean)).normalized()
+        base = azv(a) * .003 * k
+        culm = [base + top_d * Hc * i / 6 for i in range(7)]
+        if elong > .02:
+            tube(g, culm, [.0016 * (1 - .3 * i / 6) + .0006 for i in range(7)],
+                 lambda t: mix(mix(H(0x6a9a48), H(0x8ab060), t), H(0xd8c078), ripe), sides=5)
+        nl = 4
+        for i in range(nl + 1):
+            la = p - (.04 + k * .06 + i * .06)
+            if la <= 0: continue
+            gl = grow(la, .2)
+            flag = i == nl
+            if flag and elong < .5: continue
+            y = (i / nl) * .75 if elong > 0 else 0
+            Pn = base + top_d * Hc * y + UP * .004
+            L = (.08 + .07 * sm(0, 3, i) - (.05 if flag else 0)) * gl + .006
+            aa = a + i * math.pi + R(f'la{k}{i}', -.3, .3)
+            dead = sm(.6, 1, senesce * 1.5 - i * .25)
+            leaf(g, basis(Pn, *tilt(aa, lerp(.15, .6, sm(0, .4, la)) + .25 * dead)), L, .0045 if not flag else .0055,
+                 sh_linear, lambda t, s, dd=dead: lc(t, s, dd * .6), nl=8, S=S_MIN,
+                 bend=.9 + .6 * dead, twist=R(f'tw{k}{i}', -.8, .8), fold=.25, seed=k * 9 + i)
+        # Ähre schiebt sich aus der Blattscheide
+        if p > .55:
+            emerge = sm(.58, .74, p)
+            L = .055 * R(f'el{k}', .9, 1.08) * (1 - .1 * k)
+            top = culm[-1]
+            nodd = .25 * ripe
+            de = (top_d + azv(a + .5) * nodd).normalized()
+            M = basis(top - de * L * (1 - emerge), de, azv(a))
+            wheat_ear(g, R, M, L, ripe, f'{k}', emerge)
+    return g
+
+# ── Hülsenfrüchtler: Mimose ──
+
+def mimosa_leaf(g, R, base, az, th, L, key, lc, pc, closed=0.0):
+    """Doppelt gefiedert: kurzer Stiel, vier fingerförmig gespreizte Fiedern
+    mit je 12 Paaren winziger Blättchen."""
+    P = arc(base, az, th, .25, L * .4, 3)
+    tube(g, path_pts(P), [.0009, .0008, .0007, .0007], pc, sides=3)
+    end, d, z = P[-1]
+    side = d.cross(z).normalized()
+    for q, ang in enumerate((-.6, -.2, .2, .6)):
+        dq = (d * math.cos(ang) + side * math.sin(ang)).normalized()
+        Lp = L * .62 * (1 if abs(ang) < .3 else .9)
+        pts = [end + dq * Lp * i / 4 - z * .002 * (i / 4) ** 2 for i in range(5)]
+        tube(g, pts, [.0005] * 5, pc, sides=3)
+        sq = dq.cross(z).normalized()
+        npair = 10
+        for i in range(npair):
+            t = (i + .6) / (npair + .4)
+            Pi = end + dq * Lp * t - z * .002 * t * t
+            ll = .0075 * (1 - .45 * abs(t - .45) ** 1.5) * (L / .06)
+            for sg in (-1, 1):
+                dl = (dq * .35 + sq * sg).normalized()
+                up = (z * math.cos(closed * 1.4) - sq * sg * math.sin(closed * 1.4)).normalized()
+                dl2 = (dl * math.cos(closed) + z * math.sin(closed)).normalized()
+                leaf(g, basis(Pi, dl2, up), ll, ll * .32, sh_ellipse, lc, nl=2, S=S_MIN, cup=.1)
+
+def pompom(g, R, P, r, key, op):
+    """Kugeliges Köpfchen aus Staubfäden."""
+    n = 60
+    blob(g, Matrix.Translation(P), r * .3, H(0xd070a8), sides=6, mat='petal')
+    for i in range(n):
+        y = 1 - 2 * (i + .5) / n
+        rr = math.sqrt(max(0, 1 - y * y)); a = i * GOLDEN
+        d = Vector((math.cos(a) * rr, y, math.sin(a) * rr))
+        L = r * (.4 + .6 * op) * R(f'{key}f{i}', .85, 1.1)
+        tube(g, [P + d * r * .2, P + d * (r * .2 + L)], [.00045, .00035],
+             lambda t: mix(H(0xd85aa8), H(0xffc0e8), t * .8 + .1), sides=3, mat='petal', cap=False)
+
+def build_mimose(p, R):
+    g = Geo()
+    if p < .02:
+        seed_on_soil(g, R, .003, H(0x7a5a30), (1, .45, .8)); return g
+    u = clamp(p / .12)
+    stemc = lambda t: mix(H(0x9a5a48), H(0x7a7a40), t)
+    tip, ph, az = hypocotyl(g, R, u, .015, .0012, stemc)
+    fade = sm(.3, .5, p)
+    if fade < 1:
+        c = .007 + .004 * sm(.05, .25, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .55, sh_ellipse, lcol(mix(H(0x5aa048), H(0xb0a850), fade)), nl=4)
+    if p < .12: return g
+    lc = lcol(H(0x3a8a48), H(0x54945a), rib=H(0x7ab070), rib_w=.15)
+    pc = lambda t: mix(H(0x8a4a3a), H(0x6a7a40), t)
+    heads = []
+    # Hauptspross aufrecht, zwei Seitentriebe niederliegend
+    for b in range(3):
+        age = p - (.12 + b * .1)
+        if age <= 0: continue
+        gl = grow(age, .45)
+        a = az + b * 2.1
+        th = .15 if b == 0 else .9
+        L = (.26 if b == 0 else .2) * gl * R(f'bl{b}', .9, 1.08) + .01
+        B = arc(tip * .7 if b == 0 else Vector((0, .006, 0)), a, th, (.3 if b == 0 else .4), L, 8)
+        tube(g, path_pts(B), [.0016 * (1 - .4 * i / 8) + .0006 for i in range(9)], stemc, sides=4)
+        # Stacheln
+        for i in range(2, 8, 2):
+            Pi, d, z = B[i]
+            side = d.cross(z).normalized()
+            tube(g, [Pi, Pi + side * .0025 - d * .001], [.0004, 1e-5], const(H(0xb07a60)), sides=3)
+        for n in range(1, 8):
+            la = age - n * .035
+            if la <= 0: continue
+            Pn, dn, zn = B[n]
+            ll = (.05 + .02 * sm(1, 4, n) - .02 * sm(6, 8, n)) * grow(la, .2) + .006
+            mimosa_leaf(g, R, Pn, a + n * 2.4 + R(f'm{b}{n}', -.3, .3), lerp(.6, 1.15, sm(0, .2, la)), ll, f'{b}{n}', lc, stemc)
+            if 3 <= n <= 6 and n % 2 == b % 2:
+                heads.append((Pn, a + n * 2.4 + 1.3, b * 10 + n))
+    # Knospen, dann rosa Köpfchen an langen Stielen aus den Blattachseln
+    if p >= .66:
+        for Pn, a, key in heads:
+            P = arc(Pn, a, .6, -.3, .03, 3)
+            tube(g, path_pts(P), [.0006] * 4, stemc, sides=3)
+            end = P[-1][0]
+            op = sm(.84, .93, p + R(f'ho{key}', -.03, .03))
+            r = .004 + .004 * sm(.66, .84, p)
+            if op < .05:
+                blob(g, Matrix.Translation(end + UP * r * .5), r * .7, mix(H(0x8aa060), H(0xd890c0), sm(.74, .84, p)), sides=7, mat='petal')
+            else:
+                pompom(g, R, end + UP * .006, .0085, f'h{key}', op)
+    return g
+
+# ── Sonnentaugewächs: Venusfliegenfalle ──
+
+def flytrap(g, R, M, L, open_, key, lc_out):
+    """Falle: zwei Hälften am Mittelnerv, innen rot, außen grün, Randzähne."""
+    inner = lambda t, s: mix(mix(H(0xa81830), H(0xd03048), sm(.2, .8, abs(s))), H(0x6aa048), sm(.82, 1, abs(s)))
+    outer = lambda t, s: mix(lc_out(t, s), H(0x8a6040), sm(.5, 1, abs(s)) * .25)
+    shape = lambda t: math.sin(math.pi * t) ** .55
+    for sg in (-1, 1):
+        S = tuple(sg * v for v in (0, .2, .45, .7, .88, 1))
+        if sg < 0: S = S[::-1]
+        Mh = M @ Matrix.Rotation(-sg * lerp(1.45, .62, open_), 4, 'Y')
+        leaf(g, Mh, L, L * .45, shape, inner, nl=7, S=S, cup=.55, bend=.1)
+        leaf(g, Mh @ Matrix.Translation(Vector((0, 0, -.0009))), L, L * .45, shape, outer, nl=7, S=S, cup=.55, bend=.1)
+        # Wimpern am Rand
+        for i in range(1, 12):
+            t = i / 12
+            w = L * .45 * shape(t)
+            x = sg * w; zc = .55 * w * w / (L * .45)
+            P0 = Mh @ Vector((x, L * t, zc))
+            dout = (Mh.to_3x3() @ Vector((sg * 1, 0, .9))).normalized()
+            tube(g, [P0, P0 + dout * L * .3], [.00035, .0001], const(H(0x7aa850)), sides=3, mat='leaf')
+
+def build_venus(p, R):
+    g = Geo()
+    if p < .02:
+        seed_on_soil(g, R, .0013, H(0x1a1410), (1, .8, .8)); return g
+    u = clamp(p / .1)
+    stemc = lambda t: mix(H(0xd8e0c0), H(0x8ac070), t)
+    tip, ph, az = hypocotyl(g, R, u, .004, .0006, stemc)
+    fade = sm(.25, .45, p)
+    if fade < 1:
+        c = .004 + .002 * sm(.05, .2, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .5, sh_ellipse, lcol(mix(H(0x6ab050), H(0xb0a850), fade)), nl=3)
+    if p < .06: return g
+    lc = lcol(H(0x4e9a48), H(0x60a850), rib=H(0x8ac070), rib_w=.1)
+    for i in range(9):
+        age = p - (.06 + i * .07)
+        if age <= 0: continue
+        gl = grow(age, .3)
+        a = az + i * 2.3999 + R(f'a{i}', -.2, .2)
+        L = (.022 + .022 * sm(0, 4, i)) * gl * R(f'l{i}', .85, 1.12) + .004
+        th = lerp(.4, 1.25, sm(0, .4, age)) + R(f't{i}', -.12, .12)
+        # geflügelter Blattstiel
+        M = basis(Vector((0, .001, 0)), *tilt(a, th))
+        leaf(g, M, L, L * .15, lambda t: .2 + .8 * math.sin(math.pi / 2 * t) ** 1.6, lc, nl=6, S=S_LOW, cup=.3, bend=-.15)
+        # Falle am Ende, etwas aufgerichtet
+        trap_age = sm(.1, .3, age)
+        if trap_age > .05:
+            d = (M.to_3x3() @ Vector((0, 1, 0))).normalized()
+            end = M @ Vector((0, L, -.0005))
+            dt, zt = tilt(a, th - .45)
+            Lt = L * .5 * trap_age
+            flytrap(g, R, basis(end, dt, zt), Lt, sm(.15, .4, age) * (1 - .8 * (R(f'cl{i}') < .15)), f'{i}', lc)
+    # Blütenschaft hoch über den Fallen — die Bestäuber sollen nicht hineinfallen
+    if p >= .66:
+        sg = sm(.66, .84, p)
+        Ls = .2 * sg * R('sl', .9, 1.06) + .01
+        S = arc(Vector((0, .002, 0)), az + .5, .08, .1, Ls, 6)
+        tube(g, path_pts(S), [.0014, .0013, .0012, .0011, .001, .0009, .0009], const(H(0x6a9a50)), sides=4)
+        end = S[-1][0]
+        for f in range(6):
+            fa = f * TAU / 6 + R(f'fa{f}', 0, .5)
+            fp = end + azv(fa) * .012 + UP * (.006 + .003 * (f % 3))
+            tube(g, [end, fp], [.0005, .0005], const(H(0x6a9a50)), sides=3)
+            fd = (azv(fa) * .7 + UP).normalized()
+            op = sm(.84 + .02 * (f % 3), .9 + .02 * (f % 3), p)
+            if op < .1:
+                blob(g, basis(fp, fd, azv(fa)) @ Matrix.Translation(Vector((0, .003, 0))), .0025, H(0xd8e8c8), sides=5, mat='petal', sq=1.4)
+            else:
+                wheel_flower(g, R, basis(fp, fd, azv(fa)), 5, .009, .006, lcol(H(0xf4f8f0), H(0xffffff), rib=H(0x9ac088), rib_w=.12),
+                             H(0xe8e0a0), op, shape=outline(.6, .25, .2), cup=.15)
+    return g
+
+# ── Kreuzblütler: Echter Wasabi ──
+
+def sh_cordate(t): return math.sin(math.pi * (.2 + .8 * t)) ** .5 * (1 - .15 * sm(.75, 1, t))
+
+def build_wasabi(p, R):
+    g = Geo()
+    if p < .02:
+        seed_on_soil(g, R, .0026, H(0x5a4030), (1, .8, .8)); return g
+    u = clamp(p / .12)
+    stemc = lambda t: mix(H(0xd8d8c0), H(0x8ab878), t)
+    tip, ph, az = hypocotyl(g, R, u, .012, .0011, stemc)
+    fade = sm(.3, .5, p)
+    if fade < 1:
+        c = .007 + .006 * sm(.05, .25, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .85, sh_kidney, lcol(mix(H(0x5aa050), H(0xb0a850), fade), rib=H(0xa8d090)),
+                   petiole=.006, nl=5, notch=.12)
+    if p < .1: return g
+    lc = lcol(H(0x2f6e40), H(0x3f7a4e), rib=H(0x8ac080), rib_w=.04, edge=H(0x2a6038), edge_w=.25)
+    # Rhizom: dick, knotig, mit Blattnarben, schiebt sich aus dem Substrat
+    rh = sm(.25, 1, p)
+    rl = .008 + .05 * rh * R('rl', .85, 1.1)
+    rr = .004 + .011 * rh
+    def rcol(v, k):
+        scar = .5 + .5 * math.sin(v * 38 + k * .7)
+        return mix(mix(H(0x6a8a50), H(0x9fd08a), v), H(0x5a6a40), sm(.75, 1, scar) * .5)
+    lean = R('rlean', -.15, .15)
+    lathe(g, Matrix.Translation(Vector((0, -.006, 0))) @ Matrix.Rotation(lean, 4, 'X'),
+          [(rr * .7, 0), (rr, rl * .2), (rr * 1.05, rl * .5), (rr * .95, rl * .8), (rr * .8, rl * .95), (1e-5, rl)],
+          rcol, sides=10, mat='root', deform=lambda q, v, a: q * (1 + .07 * math.sin(v * 30) * math.sin(math.pi * v)))
+    crown = Vector((0, -.006 + rl * .95, 0))
+    # lange Stiele, herz- bis nierenförmige Spreiten, die äußeren sinken mit dem Alter ab
+    n = 12
+    for i in range(n):
+        age = p - (.1 + i * .06)
+        if age <= 0: continue
+        gl = grow(age, .3)
+        old = sm(.25, .7, age)
+        a = az + i * 2.3999 + R(f'a{i}', -.2, .2)
+        Lp = (.07 + .09 * sm(0, 5, i)) * gl * R(f'l{i}', .85, 1.1) + .008
+        th = lerp(.15, .9, old) + R(f't{i}', -.1, .1)
+        P = arc(crown, a, th, .35 + .2 * old, Lp, 5)
+        tube(g, path_pts(P), [.0022 * (1 - .4 * j / 5) + .0008 for j in range(6)],
+             lambda t: mix(H(0x9ab880), H(0x6aa060), t), sides=4)
+        end, d, z = P[-1]
+        Lb = (.03 + .045 * sm(0, 5, i)) * gl + .006
+        dl, zl = tilt(a, lerp(.9, 1.5, old))
+        leaf(g, basis(end, dl, zl) @ Matrix.Translation(Vector((0, -.25 * Lb, 0))), Lb, Lb * .62,
+             serrate(sh_cordate, 14, .05), lc, nl=10, S=S_FINE, sinus=.25, cup=.25, bend=.35, pucker=.08, pfreq=4,
+             ruffle=.04, rfreq=3, seed=i)
+    return g
+
+# ── Schwertliliengewächs: Safran-Krokus ──
+
+def build_safran(p, R):
+    g = Geo()
+    # Knolle mit Netzfaserhülle
+    cr = .011 * R('cr', .9, 1.1)
+    def ccol(v, k):
+        return mix(H(0x8a6a48), H(0xb08a60), .5 + .5 * math.sin(k * 2.1 + v * 9))
+    sink = sm(0, .2, p)
+    lathe(g, Matrix.Translation(Vector((0, -cr * .9 * sink, 0))),
+          [(1e-5, 0), (cr * .8, cr * .15), (cr, cr * .55), (cr * .8, cr * .95), (cr * .25, cr * 1.15), (1e-5, cr * 1.35)],
+          ccol, sides=9, mat='root')
+    if p < .03: return g
+    top = Vector((0, cr * 1.2 * (1 - sink) + .002, 0))
+    az = R('az', 0, TAU)
+    # weiße Niederblätter als Scheide
+    sh = sm(.03, .2, p)
+    tube(g, [top - UP * .004, top + UP * .02 * sh], [.0032, .0026], const(H(0xe8e4d0)), sides=6, cap=True)
+    # grasartige Blätter mit weißem Mittelstreif
+    lc = lambda t, s: mix(mix(H(0x2f5f32), H(0x4f8250), t), H(0xd8e8cc), (1 - sm(.0, .16, abs(s))) * .75)
+    for i in range(8):
+        age = p - (.04 + i * .035)
+        if age <= 0: continue
+        gl = grow(age, .3)
+        a = az + i * 2.3999 + R(f'a{i}', -.3, .3)
+        L = (.14 + .1 * sm(0, 4, i)) * gl * R(f'l{i}', .85, 1.1) + .006
+        leaf(g, basis(top, *tilt(a, .08 + .25 * sm(0, .5, age) + R(f't{i}', 0, .2))), L, .0024, sh_linear, lc,
+             nl=8, S=(-1, -.5, -.15, 0, .15, .5, 1), bend=.6 + .5 * sm(.2, .8, age), fold=-.35, twist=R(f'w{i}', -.4, .4),
+             seed=i)
+    # Blüten: Knospe in der Scheide, dann Kelch aus sechs violetten Blütenhüllblättern,
+    # drei rote Narbenäste hängen heraus, drei gelbe Staubbeutel
+    if p >= .62:
+        for f in range(1 + (R('nf') > .35) + (R('nf2') > .7)):
+            fa = az + f * 2.3 + .7
+            ft = .1 + .08 * f
+            sg = sm(.62 + .03 * f, .8 + .03 * f, p)
+            Lt = .07 * sg + .01
+            base = top + azv(fa) * .002
+            d = (UP + azv(fa) * ft).normalized()
+            tube(g, [base, base + d * Lt * .5, base + d * Lt], [.0014, .0013, .0012], const(H(0xe8e0e8)), sides=5)
+            P = base + d * Lt
+            M = basis(P, d, azv(fa + 1.6))
+            op = sm(.84 + .03 * f, .92 + .03 * f, p)
+            vio = lambda t, s: mix(mix(H(0x6a3a9a), H(0x9a5fd0), sm(0, .5, t)), H(0xb88ae0), sm(.7, 1, t) * .5 + (1 - sm(0, .15, abs(s))) * -.0)
+            veins = lambda t, s: mix(vio(t, s), H(0x5a2a8a), (1 - sm(0, .1, abs(s))) * .6)
+            if op < .05:
+                bud(g, M, .006 + .002 * sg, H(0x8a5ab8), H(0xb07ae0), .7)
+                continue
+            for k in range(6):
+                a = k * TAU / 6 + (k % 2) * .0
+                inner = k % 2
+                leaf(g, M @ basis(Vector((0, 0, 0)), *tilt(a, lerp(.12, .55, op) - .08 * inner)), .036 * (1 - .06 * inner), .0105,
+                     outline(.6, .25, .35), veins, nl=6, S=S_MED, cup=.55, bend=-.15 * op, mat='petal', seed=k)
+            # Narbenäste (der Safran) und Staubbeutel
+            for k in range(3):
+                a = k * TAU / 3 + .3
+                Sg = [M @ Vector((0, .004 + .02 * t, 0)) + (M.to_3x3() @ azv(a)) * .009 * t * t for t in (0, .35, .7, 1)]
+                Sg.append(Sg[-1] + (M.to_3x3() @ (azv(a) * .6 - UP * .4)).normalized() * .012 * op)
+                tube(g, Sg, [.0008, .0008, .001, .0013, .0016], const(H(0xd8280e)), sides=4, mat='petal', cap=True)
+                a2 = a + math.pi / 3
+                A0 = M @ Vector((0, .004, 0)); A1 = A0 + (M.to_3x3() @ (UP + azv(a2) * .35)).normalized() * .016
+                tube(g, [A0, A1], [.0009, .0013], const(H(0xf0c818)), sides=4, mat='petal', cap=True)
+    return g
+
+# ── Orchideen: Vanille ──
+
+def vanilla_flower(g, R, M, op):
+    """Wachsartige, grünlich-cremefarbene Blüte mit eingerollter Trompetenlippe."""
+    col = lcol(H(0xd8d088), H(0xf0e8b8))
+    for k in range(5):
+        a = k * TAU / 5 + .3
+        leaf(g, M @ basis(Vector((0, 0, 0)), *tilt(a, lerp(.2, .75, op))), .03, .0065, outline(.5, .2, .4), col,
+             nl=5, S=S_LOW, cup=.3, bend=.2, mat='petal', seed=k)
+    lathe(g, M, [(.0015, 0), (.004, .006), (.0055, .016), (.0072, .022)], lambda v, k: mix(H(0xe8d890), H(0xf0b830), sm(.6, 1, v) * .5),
+          sides=8, mat='petal')
+
+def vanilla_pod(g, R, P, L, s, ripe, key):
+    pts, rad = [], []
+    n = 8
+    az = R(key + 'az', 0, TAU)
+    for i in range(n + 1):
+        t = i / n
+        pts.append(P + (UP * -1 + azv(az) * .15 * t) .normalized() * L * t + azv(az + 1.5) * .006 * math.sin(t * 3) * R(key + 'c', -1, 1))
+        rad.append((.0042 * s + .0008) * math.sin(math.pi * clamp(t * .95 + .03)) ** .25 * (1 - .4 * sm(.85, 1, t)))
+    col = lambda t: mix(H(0x3a7a2c), H(0xc8b030), clamp(ripe * (1.6 * t - .2)))
+    tube(g, pts, rad, col, sides=6, mat='fruit', cap=True)
+
+def build_vanille(p, R):
+    g = Geo()
+    az = R('az', 0, TAU)
+    # Kokosstab, an dem die Kletterorchidee hochwächst
+    pole = azv(az + math.pi) * .02
+    def pcol(t):
+        return mix(H(0x5a3a22), H(0x7a5232), .5)
+    tube(g, [pole + UP * (.54 * i / 8) for i in range(9)], [.0125] * 9,
+          lambda t: mix(H(0x5a3a22), H(0x7a5838), .5 + .5 * math.sin(t * 60)), sides=10, cap=True, mat='root')
+    stemc = lambda t: mix(H(0x5a8a40), H(0x6a9a48), t)
+    lc = lcol(H(0x2f6e3c), H(0x3d7e4a), rib=H(0x5a9a5a), rib_w=.06)
+    # Steckling: ein Sprossstück mit zwei Knoten
+    if p < .06:
+        q0 = Vector((.015, .004, -.01)); q1 = Vector((-.02, .004, .015))
+        tube(g, [q0, (q0 + q1) / 2, q1], [.0035] * 3, stemc, sides=6, cap=True)
+        leaf(g, basis(q1, *tilt(az + 2, 1.2)), .05, .018, acuminate(outline(.5, .3, .3), .4), lc, nl=8, S=S_MED, cup=.3, bend=.2)
+        if p > .02:
+            tube(g, [q1, q1 + UP * .02 * sm(.02, .06, p)], [.003, .0026], stemc, sides=6, cap=True)
+        return g
+    # zickzackender Spross, windet sich um den Stab; je Knoten ein Blatt und eine Haftwurzel
+    gy = .004
+    pts = [Vector((-.02, .004, .015)), Vector((0, .006, 0))]
+    nodes = []
+    for k in range(12):
+        age = p - (.06 + k * .036)
+        if age <= 0: break
+        gy += .042 * sm(0, .1, age) + .003
+        ang = az + k * .9
+        P = pole + azv(ang) * .016 * sm(0, 2, k) + Vector((0, gy, 0))
+        if k == 0: P = P.lerp(pts[-1] + UP * gy, .5)
+        pts.append(P); nodes.append((k, age, P, ang))
+    # über dem Stab hängt die Triebspitze über
+    if len(nodes) > 10:
+        last = pts[-1]
+        over = sm(.5, .7, p)
+        for j in range(1, 4):
+            pts.append(last + azv(az + 1) * .02 * j * over + UP * (.015 * j - .008 * j * j * over))
+    tube(g, pts, [.0038 * (1 - .25 * i / len(pts)) for i in range(len(pts))], stemc, sides=6, cap=True)
+    for k, age, P, ang in nodes:
+        gl = grow(age, .2)
+        a = ang + (math.pi * .5 if k % 2 else -math.pi * .5) + R(f'a{k}', -.3, .3)
+        L = (.06 + .035 * sm(0, 3, k)) * gl * R(f'l{k}', .9, 1.08) + .006
+        A = arc(P, a, .8, .2, .006, 2)
+        tube(g, path_pts(A), [.0022] * 3, stemc, sides=4)
+        b, d, z = A[-1]
+        leaf(g, basis(b, *tilt(a, lerp(.7, 1.15, sm(0, .2, age)))), L, L * .32, acuminate(outline(.5, .35, .25), .5), lc,
+             nl=9, S=S_MED, cup=.35, bend=.3, fold=.05, seed=k)
+        # Haftwurzel zum Stab
+        if k >= 1 and age > .03:
+            to = (pole + UP * P.y - P)
+            to.y = 0
+            if to.length > 1e-4:
+                dd = to.normalized()
+                Wt = [P, P + dd * .007 - UP * .004, P + dd * .011 - UP * .012 + azv(ang + 1.6) * .006]
+                tube(g, Wt, [.0013, .0012, .0011], lambda t: mix(H(0x7a9a60), H(0xc8c8b0), t), sides=4, cap=True)
+    # Blütentrauben in den Blattachseln, danach die Schoten in Büscheln
+    if p >= .5:
+        for k, age, P, ang in nodes:
+            if k < 4 or k % 3 != 1: continue
+            a = ang + (math.pi * .5 if k % 2 else -math.pi * .5) + .8
+            C = arc(P, a, 1.0, .5, .025, 3)
+            tube(g, path_pts(C), [.0018] * 4, stemc, sides=4)
+            end = C[-1][0]
+            for f in range(4):
+                fa = a + (f - 1.5) * .7
+                fp = end + azv(fa) * .006 + UP * (-.003 * f)
+                bloom = sm(.52 + .02 * f, .56 + .02 * f, p) * (1 - sm(.6 + .02 * f, .66 + .02 * f, p))
+                if p < .68 and bloom > .05:
+                    fd = (azv(fa) + UP * .3).normalized()
+                    vanilla_flower(g, R, basis(fp, fd, UP if abs(fd.y) < .9 else azv(fa)), bloom)
+                elif p < .58 and bloom <= .05:
+                    blob(g, basis(fp, (azv(fa) + UP * .3).normalized(), UP) @ Matrix.Translation(Vector((0, .006, 0))), .0035,
+                         H(0x8ab060), sides=6, mat='petal', sq=2)
+                if p >= .64:
+                    s = sm(.64, .88, p) * R(f'ps{k}{f}', .85, 1.08)
+                    if s > .05:
+                        vanilla_pod(g, R, fp, .12 * s + .008, s, sm(.9, 1, p), f'v{k}{f}')
+    return g
+
+# ── Rötegewächs: Arabica-Kaffee ──
+
+def coffee_cluster(g, R, P, a, p, key, lc):
+    """Achselständiges Büschel: weiße Sternblüten, dann Kirschen, die ungleich reifen."""
+    n = 4 + int(R(key + 'n', 0, 3))
+    for i in range(n):
+        fa = a + (i - n / 2) * .7 + R(key + str(i), -.2, .2)
+        dP = azv(fa) * .006 + UP * (R(key + 'y' + str(i), -.004, .004))
+        fp = P + dP
+        bloom = sm(.66, .7, p) * (1 - sm(.78, .82, p))
+        if .62 <= p < .82 and i < 3:        # sparsam: die Hälfte der Knospen reicht fürs Bild
+            fd = (azv(fa) + UP * .6).normalized()
+            if bloom < .08:
+                blob(g, basis(fp, fd, azv(fa)) @ Matrix.Translation(Vector((0, .004, 0))), .0022, H(0xe8f0e0), sides=5, mat='petal', sq=2.2)
+            else:
+                star_flower(g, R, basis(fp, fd, azv(fa)), 5, .014, .0038, lambda t, s: mix(H(0xf6f6f0), H(0xffffff), t),
+                            H(0xf0f0e0), 1.0 + .5 * bloom)
+        if p >= .78:
+            fs = sm(.78, .9, p)
+            ripe = sm(.86, 1, p + R(key + 'r' + str(i), -.12, .08))
+            c = mix(mix(H(0x4a8a30), H(0xe8c040), sm(0, .45, ripe)), H(0xc4382c), sm(.4, 1, ripe))
+            c = mix(c, H(0x7a1a18), sm(.85, 1, ripe) * .5)
+            blob(g, basis(fp + dP * .4, (azv(fa) + UP * .2).normalized(), UP) @ Matrix.Translation(Vector((0, .005 * fs, 0))),
+                 .0068 * fs + .0012, c, sides=8, mat='fruit', sq=1.15)
+
+def build_kaffee(p, R):
+    g = Geo()
+    if p < .02:
+        # Pergamentkaffee: flache Seite mit Längsfurche nach unten
+        blob(g, Matrix.Translation(Vector((0, .003, 0))) @ Matrix.Rotation(R('sa', 0, 3), 4, 'Y') @ Matrix.Diagonal(Vector((1, .55, 1.4, 1))),
+             .0045, H(0xd8c8a0), sides=8); return g
+    u = clamp(p / .1)
+    stemc = lambda t: mix(H(0x8aa060), H(0x5a8a40), t)
+    lc = lcol(H(0x1e5a2e), H(0x2f6b3c), rib=H(0x5a9a5a), rib_w=.05)
+    tip, ph, az = hypocotyl(g, R, u, .05, .0016, stemc, lean=.06)
+    # „Soldat": die Samenschale sitzt noch auf den Keimblättern
+    if p < .1:
+        blob(g, Matrix.Translation(tip + UP * .003) @ Matrix.Rotation(ph, 4, 'X'), .0045, H(0xd8c8a0), sides=7, sq=1.3)
+        return g
+    # „Schmetterling": zwei runde, leicht gewellte Keimblätter
+    fade = sm(.3, .5, p)
+    if fade < 1:
+        c = .016 + .008 * sm(.1, .2, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u) * .9 + .1, c, c * .85, sh_round,
+                   lcol(mix(H(0x3a8a40), H(0xb0a850), fade), rib=H(0x8ac080)), petiole=.006, nl=6, S=S_MED, cup=.15)
+    if p < .14: return g
+    # orthotroper Haupttrieb, kreuzgegenständige Blattpaare, waagrechte Seitenäste (plagiotrop)
+    Hmax = .48 * R('h', .92, 1.05)
+    nn = 9
+    pts = [Vector((0, 0, 0)), tip]
+    nodes = []
+    gy = tip.y
+    for k in range(nn):
+        age = p - (.14 + k * .055)
+        if age <= 0: break
+        gy += (Hmax - tip.y) / nn * sm(0, .2, age) + .002
+        P = Vector((R(f'x{k}', -.003, .003), gy, R(f'z{k}', -.003, .003)))
+        pts.append(P); nodes.append((k, age, P))
+    tube(g, pts, [.0055 * (1 - .55 * i / len(pts)) + .0012 for i in range(len(pts))],
+         lambda t: mix(H(0x8a7058), H(0x5a8a40), sm(.3, .8, t)), sides=6, cap=True)
+    leafkw = dict(nl=10, S=S_MED, bend=.35, cup=-.1, ruffle=.08, rfreq=3.5, pucker=.05, fold=.12)
+    shp = acuminate(outline(.48, .05, .45), .55)
+    for k, age, P in nodes:
+        gl = grow(age, .22)
+        rot = az + k * math.pi / 2
+        L = (.06 + .03 * sm(0, 3, k) - .02 * sm(6, 9, k)) * gl + .006
+        for s in (0, 1):
+            a = rot + s * math.pi
+            A = arc(P, a, lerp(.5, 1.0, sm(0, .2, age)), .2, .006, 2)
+            tube(g, path_pts(A), [.0011] * 3, stemc, sides=3)
+            b, d, z = A[-1]
+            leaf(g, basis(b, d, z), L, L * .38, shp, lc, seed=k * 2 + s, **leafkw)
+            # Seitenäste ab dem dritten Knoten
+            if 2 <= k <= 6 and age > .1:
+                bg = grow(age - .1, .3)
+                Lb = (.14 - .015 * k) * bg + .01
+                B = arc(P, a + .25, 1.35, .15, Lb, 6)
+                tube(g, path_pts(B), [.0024 * (1 - .4 * i / 6) + .0006 for i in range(7)],
+                     lambda t: mix(H(0x7a6a50), H(0x5a8a40), t), sides=4, cap=True)
+                for q in (2, 4, 6):
+                    qa = age - .1 - q * .02
+                    if qa <= 0: continue
+                    Pq, dq, zq = B[q]
+                    sq = dq.cross(UP).normalized()
+                    lq = (.05 + .01 * (q < 6)) * grow(qa, .2) + .005
+                    for sg in (-1, 1):
+                        dl = (dq * .45 + sq * sg).normalized() + UP * .15
+                        leaf(g, basis(Pq, dl.normalized(), UP), lq, lq * .38, shp, lc, seed=k * 10 + q + sg, **leafkw)
+                    if q < 6:
+                        coffee_cluster(g, R, Pq - UP * .002, a, p, f'c{k}{s}{q}', lc)
+    return g
+
+# ── Rosengewächs: Säulenapfel ──
+
+def apple_fruit(g, R, M, s, ripe, key):
+    r = .024 * s + .002
+    prof = [(1e-5, r * .25), (r * .35, r * .05), (r * .75, r * .2), (r * .98, r * .7), (r, r * 1.05), (r * .9, r * 1.4),
+            (r * .6, r * 1.62), (r * .25, r * 1.55), (1e-5, r * 1.42)]
+    base = mix(H(0x8ab040), H(0xe0d060), ripe * .6)
+    blush = mix(H(0x9a8a30), H(0xc8241e), ripe)
+    side = R(key, 0, TAU)
+    def col(v, k):
+        a = k * TAU / 14
+        face = .5 + .5 * math.cos(a - side)
+        streak = .5 + .5 * math.sin(k * 3.1 + v * 4)
+        return mix(base, blush, clamp(face * 1.3 * ripe + streak * .25 * ripe))
+    lathe(g, M, prof, col, sides=14, mat='fruit', deform=lambda q, v, a: q * (1 + .03 * math.cos(5 * a)))
+    tube(g, [M @ Vector((0, r * 1.45, 0)), M @ Vector((.002, r * 1.45 + .012, 0))], [.0009, .0008], const(H(0x6a5030)), sides=4)
+
+def build_apfel(p, R):
+    g = Geo()
+    if p < .02:
+        blob(g, Matrix.Translation(Vector((0, .002, 0))) @ Matrix.Rotation(R('sa', 0, 3), 4, 'Y') @ Matrix.Rotation(1.5, 4, 'Z'),
+             .0022, H(0x4a2a14), sides=6, sq=1.8); return g
+    u = clamp(p / .08)
+    stemc = lambda t: mix(H(0xa07860), H(0x6a9a48), t)
+    tip, ph, az = hypocotyl(g, R, u, .02, .0013, stemc)
+    fade = sm(.15, .3, p)
+    if fade < 1:
+        c = .009 + .005 * sm(.04, .12, p)
+        cotyledons(g, R, tip, ph, az, sm(.5, 1, u), c, c * .55, sh_ellipse, lcol(mix(H(0x4a9a40), H(0xb0a850), fade)), nl=5)
+    if p < .06: return g
+    lc = lcol(H(0x3a7a3a), H(0x4a8442), rib=H(0x9ac090), rib_w=.05)
+    shp = acuminate(serrate(outline(.4, .1, .45), 10, .08), .35)
+    bark = lambda t: mix(mix(H(0x6a5040), H(0x7a6050), .5), H(0x6a9a48), sm(.85, 1, t))
+    # Ein senkrechter Stamm, der mit dem Alter verholzt
+    Hmax = .54 * R('h', .94, 1.04)
+    Ht = tip.y + (Hmax - tip.y) * sm(.06, .62, p) ** .9
+    n = 14
+    pts = [Vector((0, 0, 0))]
+    for i in range(1, n + 1):
+        y = Ht * i / n
+        pts.append(Vector((math.sin(i * 1.3) * .0015, y, math.cos(i * 1.7) * .0015)))
+    thick = .004 + .006 * sm(.2, .8, p)
+    tube(g, pts, [thick * (1 - .6 * i / n) + .0012 for i in range(n + 1)], bark, sides=7, cap=True)
+    # Fruchtspieße: kurze Kurztriebe rundum, je mit einer Blattrosette
+    spurs = []
+    for i in range(16):
+        y = .06 + i * .028
+        if y > Ht - .04: break
+        age = p - (.2 + i * .022)
+        if age <= 0: continue
+        a = az + i * 2.3999
+        Lsp = (.012 + .012 * R(f'sp{i}')) * sm(0, .15, age)
+        P0 = Vector((0, y, 0))
+        P1 = P0 + (azv(a) * .8 + UP * .5).normalized() * (Lsp + .004)
+        tube(g, [P0, P1], [.0022, .0016], bark, sides=4, cap=True)
+        spurs.append((i, age, P1, a))
+        for l in range(4):
+            la = age - l * .02
+            if la <= 0: continue
+            L = (.042 + .012 * R(f'll{i}{l}')) * grow(la, .18) + .005
+            aa = a + (l - 1.5) * .9
+            leaf(g, basis(P1, *tilt(aa, lerp(.5, 1.1, sm(0, .2, la)) + .1 * l)), L, L * .5, shp, lc,
+                 nl=9, S=S_MED, bend=.4, cup=-.2, fold=.1, pucker=.05, seed=i * 4 + l)
+    # Leittrieb mit jungen, wechselständigen Blättern
+    for l in range(5):
+        y = Ht - .01 - l * .012
+        if y < tip.y: break
+        a = az + l * 2.3999 + 1
+        L = (.03 + .008 * l) * sm(.06, .2, p) + .006
+        leaf(g, basis(Vector((0, y, 0)), *tilt(a, .45 + .12 * l)), L, L * .45, shp, lc, nl=7, S=S_LOW, bend=.3, cup=-.2, seed=50 + l)
+    # Doldentrauben an den Spießen, danach ausgedünnte Früchte direkt am Stamm
+    for i, age, P1, a in spurs:
+        if i < 2 or i % 2: continue
+        if .62 <= p < .82:
+            for f in range(5):
+                fa = a + f * TAU / 5
+                fp = P1 + azv(fa) * .008 + UP * (.006 + .004 * (f == 0))
+                tube(g, [P1, fp], [.0006, .0006], const(H(0x6a8a50)), sides=3)
+                fd = (azv(fa) * .5 + UP).normalized()
+                op = sm(.66 + .01 * f, .7 + .01 * f, p) * (1 - sm(.78, .82, p))
+                if op < .08:
+                    blob(g, basis(fp, fd, azv(fa)) @ Matrix.Translation(Vector((0, .003, 0))), .0028,
+                         mix(H(0xd8406a), H(0xf0a0b8), sm(.6, .68, p)), sides=6, mat='petal', sq=1.3)
+                else:
+                    wheel_flower(g, R, basis(fp, fd, azv(fa)), 5, .012, .009,
+                                 lambda t, s: mix(H(0xf8c8d8), H(0xfff6f8), sm(0, .7, t)), H(0xe8c040), op,
+                                 shape=outline(.55, .2, .1), cup=.45)
+        if p >= .78 and R(f'fr{i}') < .8:
+            s = sm(.78, .95, p) * R(f'fs{i}', .85, 1.05)
+            ripe = sm(.86, 1, p)
+            d = (azv(a) * .9 + UP * .2).normalized()
+            Mf = Matrix.Translation(P1 + d * (.02 * s + .002) - UP * (.026 * s)) @ Matrix.Rotation(R(f'ft{i}', -.3, .3), 4, 'Z')
+            apple_fruit(g, R, Mf, s, ripe, f'a{i}')
+    return g
+
 # ───────────────────────── Katalog ─────────────────────────
 
 STAGES = {
@@ -1138,6 +2430,9 @@ STAGES = {
     'root':   [.14, .20, .32, .24, .10],
     'fruit':  [.10, .16, .26, .16, .22, .10],
     'flower': [.12, .20, .34, .18, .16],
+    'grain':  [.10, .24, .26, .20, .20],
+    'fungus': [.55, .20, .15, .10],
+    'woody':  [.08, .30, .28, .14, .20],
 }
 SPECIES = {
     # id: (Bauplan, Phasensatz, Varianten)
@@ -1154,6 +2449,20 @@ SPECIES = {
     'microtom':   (build_microtom, 'fruit', 3),
     'chili':      (build_chili, 'fruit', 3),
     'moehre':     (build_moehre, 'root', 3),
+    'gurke':      (build_gurke, 'fruit', 3),
+    'paprika':    (build_paprika, 'fruit', 3),
+    'kartoffel':  (build_kartoffel, 'root', 3),
+    'sonnenblume': (build_sonnenblume, 'flower', 3),
+    'austernpilz': (build_austernpilz, 'fungus', 3),
+    'orchidee':   (build_orchidee, 'flower', 3),
+    'weizen':     (build_weizen, 'grain', 3),
+    'mimose':     (build_mimose, 'flower', 3),
+    'venus':      (build_venus, 'flower', 3),
+    'wasabi':     (build_wasabi, 'leafy', 3),
+    'safran':     (build_safran, 'flower', 3),
+    'vanille':    (build_vanille, 'fruit', 3),
+    'kaffee':     (build_kaffee, 'woody', 3),
+    'apfel':      (build_apfel, 'woody', 3),
 }
 
 def keys_for(stages):
