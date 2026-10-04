@@ -140,7 +140,7 @@ export function loadWallTextures() {
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     res(t);
   }, undefined, () => res(null)));
-  return Promise.all(['rack', 'panel', 'padding'].map(async name => {
+  return Promise.all(['rack', 'panel', 'padding', 'floor', 'rubber'].map(async name => {
     const [map, normalMap, orm] = await Promise.all([one(name + '_albedo.jpg', true), one(name + '_normal.jpg'), one(name + '_orm.jpg')]);
     if (map && normalMap && orm) walls[name] = { map, normalMap, orm };
   }));
@@ -172,6 +172,14 @@ function wallMaterial(name, { repeat = [1, 1], turn = false, side = THREE.FrontS
 export function panelMaterial(uvPerM = 1, { side = THREE.DoubleSide, tint = 0xffffff } = {}) {
   const r = 1 / (2.2 * uvPerM);
   return wallMaterial('panel', { repeat: [r, r], side, tint });
+}
+
+/** Gebackene Kachel für andere Module (props.js): { map, normalMap, orm } oder undefined. */
+export function bakedTile(name) { return walls[name]; }
+
+/** Riffelblech; sizeU, sizeV = Meter, über die eine UV-Einheit reicht (1,4 m je Kachel). */
+export function floorMaterial(sizeU, sizeV, { side = THREE.FrontSide, tint = 0xffffff } = {}) {
+  return wallMaterial('floor', { repeat: [sizeU / 1.4, sizeV / 1.4], side, tint, normal: 1.4 });
 }
 
 /** Gesteppte Polsterung der Lounge auf einer Halbschale von innen. */

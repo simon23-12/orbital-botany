@@ -140,7 +140,8 @@ Schwerelosigkeit, den Feuerlöscher mit Manometer, Schlauch und Halterung —
 er hängt in jedem Modul — und den verschraubten Bodenbelag mit
 Lüftungsgittern und Leitlicht — und die Stoffkatze „Laika": ein Plüschtier aus
 Metabällen mit Nähten, gestickter Nase, Sicherheitsaugen unter halb gesenkten
-Lidern und rotem Halsband, das auf der Fensterbank sitzt. Die Umgebungsverdeckung wird mit Cycles in die
+Lidern und rotem Halsband, das auf der Fensterbank sitzt — und die karierte
+Wolldecke, die per Stoffsimulation über die Armlehne der Couch fällt. Die Umgebungsverdeckung wird mit Cycles in die
 Eckfarben gebacken. Ausgabe nach `assets/props/`:
 
 ```bash
@@ -151,8 +152,9 @@ Die Wände der Module sind ebenfalls in Blender modelliert und gebacken:
 `tools/walls_blender.py` baut Rackfronten (Sitzschienen im Zollraster,
 Schubladen mit Bügelgriffen, Spinde mit Hebelschließen, Lüftungsgitter,
 Anschlussfelder, gepolsterte Nomex-Bezüge, Brandschutzports, Etiketten),
-verschraubte Wandpaneele für Stirnwände und Knoten sowie die gesteppte
-Polsterung der Lounge als echte Geometrie. Cycles backt daraus je Kachel Farbe,
+verschraubte Wandpaneele für Stirnwände und Knoten, die gesteppte
+Polsterung der Lounge, das Riffelblech der Modulböden (mit
+Antirutschstreifen) und den Noppenbelag der Lounge als echte Geometrie. Cycles backt daraus je Kachel Farbe,
 Normalen und eine ORM-Karte (Verdeckung, Rauheit, Metall) nach `assets/walls/`.
 Die Modulwand besteht aus zwei Halbschalen, damit die Racks auf beiden Seiten
 aufrecht stehen. Neu backen (gut fünf Minuten):

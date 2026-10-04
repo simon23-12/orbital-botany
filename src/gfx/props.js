@@ -13,6 +13,7 @@
  *  dann Indizes uint16 bzw. uint32.
  */
 import * as THREE from 'three';
+import { bakedTile } from './outfit.js';
 
 const BASE = './assets/props/';
 
@@ -172,6 +173,15 @@ function material(kind) {
     case 'eye': m = new THREE.MeshStandardMaterial({ ...c, roughness: .18, envMapIntensity: .35 }); break;
     case 'wood': m = new THREE.MeshStandardMaterial({ ...c, map: grain(), roughness: .55 }); break;
     case 'floor': {
+      // Noppenbelag aus tools/walls_blender.py; die Eckfarben tönen ihn je Platte
+      const r = bakedTile('rubber');
+      if (r) {
+        const tile = k => { const t = r[k].clone(); t.repeat.set(1 / .4, 1 / .4); t.needsUpdate = true; return t; };
+        const orm = tile('orm');
+        m = new THREE.MeshStandardMaterial({ ...c, map: tile('map'), normalMap: tile('normalMap'), normalScale: new THREE.Vector2(1.3, 1.3),
+          aoMap: orm, roughnessMap: orm, roughness: 1, metalness: 0 });
+        break;
+      }
       const t = speckle();
       m = new THREE.MeshStandardMaterial({ ...c, roughness: .62, metalness: .1, bumpMap: t, bumpScale: .5, roughnessMap: t });
       break;

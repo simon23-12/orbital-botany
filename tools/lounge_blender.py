@@ -612,6 +612,99 @@ def build_shelf():
             pr.add('metal', hook, H(0x9aa0a6), ao=.3)
     return pr
 
+# ───────────────────────── Wolldecke über der Armlehne ─────────────────────────
+# Mit Blenders Stoffsimulation über die linke Armlehne der Couch geworfen:
+# Ein Teil liegt auf dem Sitzkissen, der Rest hängt außen herab. Koordinaten
+# wie die Couch (vorn −Z), damit die Decke im Spiel einfach in die Couch-Gruppe kommt.
+
+def plaid(u, v):
+    """Karierte Wolldecke: Terrakotta mit dunklen Bahnen und hellen Fäden."""
+    base = H(0xa8503a)
+    def band(t, n):
+        f = (t * n) % 1.0
+        return sm(.0, .06, f) * sm(.26, .2, f), sm(.42, .45, f) * sm(.5, .47, f)
+    d1, l1 = band(u, 7); d2, l2 = band(v, 4)
+    c = base * (1 - .32 * d1) * (1 - .32 * d2)
+    c = mix(c, H(0xe8d8bc), max(l1, l2) * .75)
+    # Saum an den kurzen Enden
+    c = mix(c, H(0x5a2a1e), sm(.03, .0, min(u, 1 - u)) * .8)
+    return c
+
+def build_blanket():
+    pr = Prop('blanket', ao=.85, ao_dist=.12, occluders=('floor',))
+    sc = bpy.context.scene
+    c = coll('LB_cloth')
+    couch = build_couch()
+    obs = to_blender(couch, c)
+    for _, _, o in obs:
+        o.modifiers.new('Collision', 'COLLISION')
+        o.collision.thickness_outer = .006
+        o.collision.cloth_friction = 12
+    fl = occluder('floor', c)
+    fl.modifiers.new('Collision', 'COLLISION')
+    # Decke: 1,15 m × 0,62 m, quer über der Armlehne, leicht schräg
+    nu, nv = 92, 50
+    L, Wd = 1.15, .62
+    V, F, UV = [], [], []
+    for j in range(nv + 1):
+        for i in range(nu + 1):
+            u, v = i / nu, j / nv
+            x = -1.0 + (u - .5) * L
+            z = -.1 + (v - .5) * Wd + .08 * (u - .5)
+            y = .82 + .03 * math.sin(u * 7 + v * 3)
+            V.append(Vector((x, y, z))); UV.append((u, v))
+    for j in range(nv):
+        for i in range(nu):
+            a = j * (nu + 1) + i
+            F.append((a, a + 1, a + nu + 2, a + nu + 1))
+    me = bpy.data.meshes.new('LB_blanket')
+    me.from_pydata([g2b(v) for v in V], [], F)
+    ob = bpy.data.objects.new('LB_blanket', me)
+    c.objects.link(ob)
+    cl = ob.modifiers.new('Cloth', 'CLOTH')
+    st = cl.settings
+    st.quality = 10
+    st.mass = .4
+    st.tension_stiffness = st.compression_stiffness = 20
+    st.shear_stiffness = 8
+    st.bending_stiffness = .8
+    st.air_damping = 2
+    cs = cl.collision_settings
+    cs.distance_min = .005
+    cs.use_self_collision = True
+    cs.self_distance_min = .004
+    cl.point_cache.frame_start, cl.point_cache.frame_end = 1, 90
+    for f in range(1, 91):
+        sc.frame_set(f)
+    dg = bpy.context.evaluated_depsgraph_get()
+    em = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    P = [Vector((v.co.x, v.co.z, -v.co.y)) for v in em.vertices]
+    bpy.data.meshes.remove(em)
+    sc.frame_set(1)
+    coll('LB_cloth')
+    # Dicke: Ober- und Unterseite plus Rand, damit die hängende Seite von beiden Seiten sichtbar ist
+    N = [Vector((0, 0, 0)) for _ in P]
+    for f in F:
+        a, b, d = P[f[0]], P[f[1]], P[f[3]]
+        n = (b - a).cross(d - a)
+        for i in f: N[i] += n
+    N = [n.normalized() if n.length > 1e-12 else Vector((0, 1, 0)) for n in N]
+    if sum(n.y for n in N) < 0: N = [-n for n in N]; F = [f[::-1] for f in F]
+    t = .007
+    cols = [plaid(u, v) for u, v in UV]
+    top = Block(); top.V = [p + n * t / 2 for p, n in zip(P, N)]; top.F = list(F)
+    bot = Block(); bot.V = [p - n * t / 2 for p, n in zip(P, N)]; bot.F = [f[::-1] for f in F]
+    pr._add_indexed('fabric', top, cols)
+    pr._add_indexed('fabric', bot, [c0 * .92 for c0 in cols])
+    rim = Block()
+    ring = [(i, 0) for i in range(nu)] + [(nu, j) for j in range(nv)] + [(i, nv) for i in range(nu, 0, -1)] + [(0, j) for j in range(nv, 0, -1)]
+    idx = [j * (nu + 1) + i for i, j in ring]
+    rim.V = [top.V[k] for k in idx] + [bot.V[k] for k in idx]
+    m = len(idx)
+    rim.F = [(k, (k + 1) % m, m + (k + 1) % m, m + k) for k in range(m)]
+    pr._add_indexed('fabric', rim, [cols[k] * .8 for k in idx] * 2)
+    return pr
+
 # ───────────────────────── Feuerlöscher ─────────────────────────
 # Rückseite bei z = 0 (Wand), steht entlang +Y, Flasche mittig bei y = 0.
 
@@ -1088,7 +1181,7 @@ def pack(pr, buf):
     return {'posScale': 1 / q, 'uvScale': 1 / UV_Q, 'subs': subs}
 
 BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_extinguisher, 'floor_lounge': build_floor,
-            'cat': build_cat}
+            'cat': build_cat, 'blanket': build_blanket}
 
 def export(ids=None):
     out = os.path.join(ROOT, 'assets', 'props')

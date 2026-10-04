@@ -443,10 +443,75 @@ def padding_tile():
             t += .016
     return k
 
+# ───────────────────────── Bodenbelag ─────────────────────────
+# Riffelblech in vier verschraubten Platten je Kachel (1,4 m × 1,4 m), dazu
+# ein Streifen Antirutschbelag. Die Rauten stehen im üblichen Fischgrätmuster.
+
+def floor_tile():
+    W = Hh = 1.4
+    k = Kit(W, Hh)
+    R = Rand('floor')
+    k.mat('void', H(0x15171a), .8)
+    k.mat('plate', H(0x6a7078), .48, .75)
+    k.mat('plate2', H(0x646a72), .5, .75)
+    k.mat('lug', H(0x7c828a), .32, .85)
+    k.mat('screw', H(0x8c9096), .35, .9)
+    k.mat('slot', H(0x1a1b1e), .6)
+    k.mat('grip', H(0x2c2e31), .97)
+    k.mat('grip_y', H(0xc89a24), .9)
+    k.box('void', -.05, -.05, W + .05, Hh + .05, -.02, -.012)
+    half = W / 2
+    for i in range(2):
+        for j in range(2):
+            x0, y0 = i * half + .004, j * half + .004
+            x1, y1 = (i + 1) * half - .004, (j + 1) * half - .004
+            k.box('plate' if (i + j) % 2 else 'plate2', x0, y0, x1, y1, -.012, 0, bevel=.003, seg=3)
+            for t in np.arange(.03, half - .02, .16):
+                for yy in (y0 + .016, y1 - .016): k.screw(x0 + t, yy, -.0004, r=.0045)
+                for xx in (x0 + .016, x1 - .016): k.screw(xx, y0 + t, -.0004, r=.0045)
+    # Rauten: 28 mm lang, 9 mm breit, im Wechsel um ±45° gedreht, 30 mm Raster
+    p = .03
+    nx = int(W / p)
+    for a in range(nx):
+        for b in range(nx):
+            cx, cy = (a + .5) * p, (b + .5) * p
+            if min(cx % half, half - cx % half) < .035 or min(cy % half, half - cy % half) < .035: continue
+            ang = math.pi / 4 if (a + b) % 2 else -math.pi / 4
+            bm = k.bm('lug')
+            M = Matrix.Translation((cx, cy, .0006)) @ Matrix.Rotation(ang, 4, 'Z') @ Matrix.Diagonal((1, .32, 1, 1))
+            bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=12, radius1=.014, radius2=.011, depth=.0013, matrix=M)
+    # Antirutschstreifen mit gelber Kante quer über eine Platte
+    gy = half + .25
+    k.box('grip_y', .08, gy - .052, half - .08, gy + .052, 0, .0012, bevel=.001)
+    k.box('grip', .084, gy - .046, half - .084, gy + .046, .0012, .0022, bevel=.001)
+    return k
+
+# ───────────────────────── Noppenbelag der Lounge ─────────────────────────
+# Weicher Gummibelag mit runden Noppen im 40-mm-Raster. Die Farbe ist fast
+# neutral: Die Bodenplatten der Lounge tönen sie über ihre Eckfarben.
+
+def rubber_tile():
+    W = Hh = .4
+    k = Kit(W, Hh)
+    k.mat('rubber', H(0xd4d0ca), .86)
+    k.mat('stud', H(0xdcd8d2), .6)
+    # sichtbare Grundfläche als einfache Ebene: Randkopien eines Quaders würden sich überlappen
+    k.grid('rubber', -.05, -.05, W + .05, Hh + .05, lambda x, y: 0.0, 4, 4)
+    p = .04
+    for a in range(10):
+        for b in range(10):
+            cx, cy = (a + .5) * p, (b + .5) * p
+            bm = k.bm('stud')
+            bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=24, radius1=.0135, radius2=.0118,
+                                  depth=.0018, matrix=Matrix.Translation((cx, cy, .0009)))
+    return k
+
 TILES = {
     'rack':    (rack_tile, 1.3, 1.6, 2048, .045),
     'panel':   (panel_tile, 2.2, 2.2, 2048, .04),
     'padding': (padding_tile, 1.5, 1.5, 1024, .07),
+    'floor':   (floor_tile, 1.4, 1.4, 2048, .04),
+    'rubber':  (rubber_tile, .4, .4, 1024, .03),
 }
 
 # ───────────────────────── Backen ─────────────────────────

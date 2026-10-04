@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
-import { rackMaterial, panelTexture, panelMaterial, paddingMaterial, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
+import { rackMaterial, panelTexture, panelMaterial, paddingMaterial, floorMaterial, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
 import { hasPlantModel } from './plantModels.js';
 import { hasProp, makeProp } from './props.js';
@@ -226,7 +226,8 @@ function shell(len, rad, M, opts = {}) {
   const ft = floorTexture(); ft.repeat.set(len / 1.4, rad);
   const floor = new THREE.Mesh(
     axis === 'x' ? new THREE.BoxGeometry(len, .08, rad * 1.42) : new THREE.BoxGeometry(rad * 1.42, .08, len),
-    new THREE.MeshStandardMaterial({ map: ft, color: 0xe2e6ea, roughness: .68, metalness: .3 }));
+    (axis === 'x' ? floorMaterial(len, rad * 1.42) : floorMaterial(rad * 1.42, len)) ||
+      new THREE.MeshStandardMaterial({ map: ft, color: 0xe2e6ea, roughness: .68, metalness: .3 }));
   floor.position.y = -rad * .72;
   floor.receiveShadow = true;
   g.add(floor);
@@ -395,7 +396,10 @@ const ROOMS = {
     ctx.couch = couch;
 
     // Decke (Komfortgegenstand)
-    if (st.comfort.includes('blanket')) {
+    // Wolldecke: in Blender per Stoffsimulation über die Armlehne geworfen
+    const blanket = st.comfort.includes('blanket') && hasProp('couch') && makeProp('blanket');
+    if (blanket) couch.add(blanket);
+    else if (st.comfort.includes('blanket')) {
       const bl = new THREE.Mesh(new THREE.BoxGeometry(1.1, .07, .95),
         new THREE.MeshStandardMaterial({ map: fabricTexture('#8c4a3a'), color: 0xd4917a, roughness: .98 }));
       bl.position.set(-.8, hasProp('couch') ? .47 : .63, -.1); bl.rotation.set(.1, .2, .06);
@@ -897,7 +901,8 @@ const ROOMS = {
     const ft = floorTexture(); ft.repeat.set(6, 6);
     // Boden mit Luke in der Mitte — darunter liegt der Knoten
     const floor = new THREE.Mesh(new THREE.RingGeometry(HATCH_R, R, 48, 2),
-      new THREE.MeshStandardMaterial({ map: ft, color: 0x8e959c, roughness: .8, metalness: .3, side: THREE.DoubleSide }));
+      floorMaterial(2 * R, 2 * R, { side: THREE.DoubleSide, tint: 0xc4c8cc }) ||
+        new THREE.MeshStandardMaterial({ map: ft, color: 0x8e959c, roughness: .8, metalness: .3, side: THREE.DoubleSide }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = -1.6;
     floor.receiveShadow = true;
     g.add(floor);
