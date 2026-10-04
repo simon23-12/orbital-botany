@@ -82,12 +82,20 @@ export const UI = {
       if (!built && !building && st.level < def.level - 2) continue;
       const b = el('button', {
         class: 'room' + (built ? '' : ' is-locked') + (app.room === id ? ' is-active' : ''),
-        title: def.name,
+        title: app.room === id && app.mode === 'interior' ? `${def.name} · Fenster ein/aus` : def.name,
         onclick: () => {
           if (!built) {
             sfx.error();
             this.toast('info', def.name, building ? 'Wird gerade montiert.' : `Freigabe ab Stufe ${def.level} · im Ausbau bestellen.`);
             if (!building && st.level >= def.level) this.open('build');
+            return;
+          }
+          // Klick auf den Raum, in dem man schon ist: Fenster ein- oder ausfahren
+          if (app.mode === 'interior' && app.room === id) {
+            const p = app.roomPanel(id);
+            sfx.click();
+            if (this.panel?.id === p) this.close();
+            else app.openRoomPanel();
             return;
           }
           sfx.open(); app.goRoom(id);
@@ -126,7 +134,13 @@ export const UI = {
   close() {
     this.panel = null;
     this._panelKey = null;
-    clear(this.els.stage);
+    // Panel fährt nach rechts hinaus; wird währenddessen ein neues geöffnet, bleibt dieses stehen
+    const node = this.els.stage.firstElementChild;
+    const token = this._closeToken = (this._closeToken || 0) + 1;
+    if (node && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      node.classList.add('is-leaving');
+      setTimeout(() => { if (this._closeToken === token && !this.panel) clear(this.els.stage); }, 260);
+    } else clear(this.els.stage);
     this.buildRooms();
     this.app.walkHint?.();
   },
@@ -158,6 +172,7 @@ export const UI = {
     // Slider ziehen, Zahl eintippen: dann bleibt das Panel, wie es ist
     if (same && opts.auto && this.isBusy()) return;
     const scrollTop = $('.panel__body', this.els.stage)?.scrollTop || 0;
+    this._closeToken = (this._closeToken || 0) + 1;      // laufendes Ausfahren abbrechen
     const node = fn(this.app, this.panel.arg, this);
     // Die Einblendbewegung gehört zum Öffnen, nicht zu jeder Aktualisierung
     if (same) node.style.animation = 'none';
