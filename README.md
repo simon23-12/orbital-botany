@@ -147,6 +147,20 @@ Eckfarben gebacken. Ausgabe nach `assets/props/`:
 blender --background --python tools/lounge_blender.py
 ```
 
+Die Wände der Module sind ebenfalls in Blender modelliert und gebacken:
+`tools/walls_blender.py` baut Rackfronten (Sitzschienen im Zollraster,
+Schubladen mit Bügelgriffen, Spinde mit Hebelschließen, Lüftungsgitter,
+Anschlussfelder, gepolsterte Nomex-Bezüge, Brandschutzports, Etiketten),
+verschraubte Wandpaneele für Stirnwände und Knoten sowie die gesteppte
+Polsterung der Lounge als echte Geometrie. Cycles backt daraus je Kachel Farbe,
+Normalen und eine ORM-Karte (Verdeckung, Rauheit, Metall) nach `assets/walls/`.
+Die Modulwand besteht aus zwei Halbschalen, damit die Racks auf beiden Seiten
+aufrecht stehen. Neu backen (gut fünf Minuten):
+
+```bash
+blender --background --python tools/walls_blender.py
+```
+
 Ohne Blender-Programm geht es auch mit dem Python-Modul (`pip install bpy`).
 Fehlt das Paket, baut das Spiel die alten, einfachen Formen.
 

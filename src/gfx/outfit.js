@@ -123,8 +123,73 @@ export function rackTextures() {
   });
 }
 
+/* ───────────────────── Gebackene Wandkacheln ─────────────────────
+   tools/walls_blender.py modelliert Rackfronten, Wandpaneele und die
+   Lounge-Polsterung als echte Geometrie und backt daraus Farbe, Normalen und
+   eine ORM-Karte (R Verdeckung, G Rauheit, B Metall). Fehlen die Dateien,
+   bleiben die gezeichneten Kacheln. */
+const WALLS = './assets/walls/';
+const walls = {};
+
+/** Lädt die Wandkacheln. Löst immer auf. */
+export function loadWallTextures() {
+  const L = new THREE.TextureLoader();
+  const one = (file, srgb) => new Promise(res => L.load(WALLS + file, t => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    res(t);
+  }, undefined, () => res(null)));
+  return Promise.all(['rack', 'panel', 'padding'].map(async name => {
+    const [map, normalMap, orm] = await Promise.all([one(name + '_albedo.jpg', true), one(name + '_normal.jpg'), one(name + '_orm.jpg')]);
+    if (map && normalMap && orm) walls[name] = { map, normalMap, orm };
+  }));
+}
+
+/**
+ * Material aus einer gebackenen Kachel. repeat = Kacheln je UV-Einheit;
+ * turn dreht die Kachel um 90° (Rackfronten stehen quer zur Modulachse).
+ */
+function wallMaterial(name, { repeat = [1, 1], turn = false, side = THREE.FrontSide, tint = 0xffffff, normal = 1.2 } = {}) {
+  const w = walls[name];
+  if (!w) return null;
+  const tex = {};
+  for (const k of ['map', 'normalMap', 'orm']) {
+    const t = w[k].clone();
+    t.repeat.set(repeat[0], repeat[1]);
+    if (turn) t.rotation = Math.PI / 2;
+    t.needsUpdate = true;
+    tex[k] = t;
+  }
+  return new THREE.MeshStandardMaterial({
+    map: tex.map, normalMap: tex.normalMap, normalScale: new THREE.Vector2(normal, normal),
+    aoMap: tex.orm, aoMapIntensity: 1, roughnessMap: tex.orm, metalnessMap: tex.orm,
+    roughness: 1, metalness: 1, color: tint, side,
+  });
+}
+
+/** Wandpaneele für Stirnwände und Knoten; uvPerM = UV-Einheiten je Meter der Geometrie. */
+export function panelMaterial(uvPerM = 1, { side = THREE.DoubleSide, tint = 0xffffff } = {}) {
+  const r = 1 / (2.2 * uvPerM);
+  return wallMaterial('panel', { repeat: [r, r], side, tint });
+}
+
+/** Gesteppte Polsterung der Lounge auf einer Halbschale von innen. */
+export function paddingMaterial(rad, len, tint = 0xffffff) {
+  return wallMaterial('padding', { repeat: [-Math.round(Math.PI * rad / 1.5), Math.round(len / 1.5)], side: THREE.BackSide, tint, normal: 1 });
+}
+
 /** Material für Modulwände mit Rackverkleidung. Die Farbe tönt nur. */
-export function rackMaterial(tint = 0xffffff, repU = 6, repV = 3) {
+export function rackMaterial(tint = 0xffffff, repU = 6, repV = 3, rad = 0, len = 0) {
+  // Gebackene Rackfront: 1,3 m breit entlang der Modulachse, 1,6 m hoch rund um den Umfang
+  if (walls.rack && rad > 0) {
+    const m = wallMaterial('rack', {
+      // gedreht: Kachel-x läuft entlang der Achse (UV v), Kachel-y vom Boden zur Decke (UV u einer Halbschale)
+      repeat: [Math.max(1, Math.round(len / 1.3)), -Math.max(2, Math.round(Math.PI * rad / 1.6))], turn: true,
+      side: THREE.BackSide, tint,
+    });
+    if (m) return m;
+  }
   const { map, bumpMap } = rackTextures();
   const m = map.clone(), b = bumpMap.clone();
   m.repeat.set(repU, repV); b.repeat.set(repU, repV);

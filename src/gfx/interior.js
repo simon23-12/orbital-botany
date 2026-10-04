@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
-import { rackMaterial, panelTexture, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
+import { rackMaterial, panelTexture, panelMaterial, paddingMaterial, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
 import { hasPlantModel } from './plantModels.js';
 import { hasProp, makeProp } from './props.js';
@@ -161,9 +161,11 @@ function tray(size = 0.58, withLamp = true) {
 
 /** Gepolsterte, warme Wandbespannung für die Lounge. */
 function cozyWall(len, rad) {
+  const baked = paddingMaterial(rad, len, 0xf4e6d0);
+  if (baked) return baked;
   const m = outfitMats().padding.clone();
   m.map = m.map.clone(); m.map.needsUpdate = true;
-  m.map.repeat.set(Math.round(TAU * rad / 1.5), Math.round(len / 1.5));
+  m.map.repeat.set(Math.round(Math.PI * rad / 1.5), Math.round(len / 1.5));
   m.color.set(0xecdcc4);
   m.side = THREE.BackSide;
   return m;
@@ -193,13 +195,25 @@ function shell(len, rad, M, opts = {}) {
   const along = v => axis === 'x' ? new THREE.Vector3(v, 0, 0) : new THREE.Vector3(0, 0, v);
   const ends = opts.ends || (opts.openEnds ? { neg: 'open', pos: 'open' } : { neg: 'closed', pos: 'closed' });
 
-  /* Rackverkleidung rundum — eine Kachel ist gut 1,3 m breit und 1,6 m hoch */
-  const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(rad, rad, len, 40, 1, true),
-    opts.cozy ? cozyWall(len, rad) : rackMaterial(opts.color ?? 0xffffff, Math.max(4, Math.round(TAU * rad / 1.3)), Math.max(1, Math.round(len / 1.6)))
-  );
+  /* Rackverkleidung rundum — eine Kachel ist gut 1,3 m breit und 1,6 m hoch.
+     Zwei Halbschalen mit Naht an Boden und Decke: Auf beiden Seiten laufen die
+     Kacheln vom Boden nach oben, die Racks stehen also überall aufrecht. */
+  const wallMat = opts.cozy ? cozyWall(len, rad)
+    : rackMaterial(opts.color ?? 0xffffff, Math.max(2, Math.round(Math.PI * rad / 1.3)), Math.max(1, Math.round(len / 1.6)), rad, len);
+  const wall = new THREE.Group();
+  const t0 = axis === 'z' ? 0 : -Math.PI / 2;                    // Winkel des Bodens im Zylinder
+  for (const half of [0, 1]) {
+    const geo = new THREE.CylinderGeometry(rad, rad, len, 20, 1, true, t0 + half * Math.PI, Math.PI);
+    if (half) {
+      // zweite Hälfte beginnt an der Decke: um 180° gedreht, damit sie ebenfalls am Boden anfängt
+      const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, 1 - uv.getX(i), 1 - uv.getY(i));
+    }
+    const m = new THREE.Mesh(geo, wallMat);
+    m.receiveShadow = true;
+    wall.add(m);
+  }
   if (axis === 'x') wall.rotation.z = Math.PI / 2; else wall.rotation.x = Math.PI / 2;
-  wall.receiveShadow = true;
   g.add(wall);
 
   /* Außenhaut: Von innen unsichtbar, aber aus der Kuppel oder durch ein
@@ -238,13 +252,15 @@ function shell(len, rad, M, opts = {}) {
   // Stirnwände
   const capTex = panelTexture().clone(); capTex.needsUpdate = true; capTex.repeat.set(.45, .45);
   const capMat = new THREE.MeshStandardMaterial({ map: capTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide });
+  // gebackene Paneele: Durchstiegswände haben UVs in Metern, geschlossene Kreise 0…1 über den Durchmesser
+  const portMat = panelMaterial(1) || capMat, capMatB = panelMaterial(1 / (2 * rad)) || capMat;
   for (const [key, sgn] of [['neg', -1], ['pos', 1]]) {
     const kind = ends[key];
     if (kind === 'open') continue;
     const rot = new THREE.Euler();
     if (axis === 'x') rot.y = -sgn * Math.PI / 2; else if (sgn < 0) rot.y = Math.PI;
     if (kind === 'port') {
-      const w = portWall(rad, capMat);
+      const w = portWall(rad, portMat);
       w.position.copy(along(sgn * len / 2));
       w.rotation.copy(rot);
       g.add(w);
@@ -254,7 +270,7 @@ function shell(len, rad, M, opts = {}) {
       g.add(ring);
       continue;
     }
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(rad, 32), capMat);
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(rad, 32), capMatB);
     cap.position.copy(along(sgn * len / 2));
     cap.rotation.copy(rot);
     g.add(cap);
@@ -1115,7 +1131,7 @@ const ROOMS = {
     const endHole = new THREE.Path(); endHole.absarc(0, PORT_Y, PORT_R, 0, TAU, true); endShape.holes.push(endHole);
     const endTex = panelTexture().clone(); endTex.needsUpdate = true; endTex.repeat.set(.45, .45);
     const endWall = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40),
-      new THREE.MeshStandardMaterial({ map: endTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide }));
+      panelMaterial(1) || new THREE.MeshStandardMaterial({ map: endTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide }));
     endWall.position.z = -LEN / 2;
     g.add(endWall);
     const outer = new THREE.Mesh(new THREE.ShapeGeometry(endShape, 40), M.hull);
@@ -1263,7 +1279,7 @@ function buildNode(ports, M, names = {}) {
   const S = NODE_H;
   const tex = panelTexture();
   tex.repeat.set(.5, .5);
-  const wallMat = new THREE.MeshStandardMaterial({ map: tex, color: 0xffffff, roughness: .7, metalness: .08, side: THREE.DoubleSide });
+  const wallMat = panelMaterial(1) || new THREE.MeshStandardMaterial({ map: tex, color: 0xffffff, roughness: .7, metalness: .08, side: THREE.DoubleSide });
   const doorMat = new THREE.MeshStandardMaterial({ color: 0x5e7aa0, roughness: .5, metalness: .35 });
   const faces = [
     ['+x', [S, 0, 0], [0, -Math.PI / 2, 0]], ['-x', [-S, 0, 0], [0, Math.PI / 2, 0]],
