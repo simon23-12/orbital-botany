@@ -104,6 +104,21 @@ class Kit:
             M = Matrix.Translation((cx + dx, cy + dy, z)) @ Matrix.Rotation(a, 4, 'Z') @ Matrix.Rotation(math.pi / 2, 4, 'Y')
             bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=seg, radius1=r, radius2=r, depth=L, matrix=M)
 
+    def path(self, mat, pts, r, seg=8):
+        """Schlauch mit Kreisquerschnitt entlang eines Polygonzugs (ohne Randkopien)."""
+        bm = self.bm(mat)
+        n = len(pts)
+        rings = []
+        for i, p in enumerate(pts):
+            t = (Vector(pts[min(i + 1, n - 1)]) - Vector(pts[max(i - 1, 0)])).normalized()
+            a = Vector((0, 0, 1)) if abs(t.z) < .9 else Vector((1, 0, 0))
+            u = (a - t * a.dot(t)).normalized(); w = t.cross(u)
+            rings.append([bm.verts.new(Vector(p) + (u * math.cos(k * TAU / seg) + w * math.sin(k * TAU / seg)) * r) for k in range(seg)])
+        for i in range(n - 1):
+            for k in range(seg):
+                k2 = (k + 1) % seg
+                bm.faces.new((rings[i][k], rings[i][k2], rings[i + 1][k2], rings[i + 1][k]))
+
     def screw(self, x, y, z, r=.0045, mat='screw', slot=True):
         """Unverlierbare Schraube: flacher Kopf mit Schlitz."""
         self.cyl(mat, x, y, r, z - .001, z + .0016, seg=14)
@@ -506,12 +521,46 @@ def rubber_tile():
                                   depth=.0018, matrix=Matrix.Translation((cx, cy, .0009)))
     return k
 
+# ───────────────────────── Geflochtener Teppich ─────────────────────────
+# Reihen aus dreisträngigen Zöpfen, je 30 mm breit, 50 Reihen = 1,5 m. Im Spiel
+# liegen die Reihen als Ringe um die Mitte: Die Kachel läuft entlang einer Reihe
+# (u, 0,3 m = sechs Flechtperioden) und quer über alle Reihen (v, 1,5 m).
+
+BRAID = [0x8a4a34, 0xc8bca4, 0x6a5040, 0x4e5a64, 0x9a7a44, 0x7a7a66, 0x5a3a2e, 0xb0a48c]
+
+def braid_tile():
+    W, Hh = .3, 1.5
+    k = Kit(W, Hh)
+    R = Rand('braid')
+    k.mat('back', H(0x3a3028), .95)
+    for i, c in enumerate(BRAID): k.mat(f'c{i}', H(c), .93)
+    k.grid('back', -.02, -.02, W + .02, Hh + .02, lambda x, y: 0.0, 2, 8)
+    P, A, rs = .05, .0085, .0062
+    rows = int(Hh / .03)
+    theme = 0
+    for j in range(rows):
+        cy = (j + .5) * .03
+        if R() < .2: theme = int(R(0, len(BRAID) - 1e-9))
+        # meist zwei Stränge in der Bandfarbe, einer als Akzent aus Braun- und Cremetönen
+        accent = [1, 2, 6, 7][int(R(0, 3.999))]
+        cols = [theme, theme if R() < .6 else accent, accent]
+        for s3 in range(3):
+            ph = s3 * TAU / 3
+            pts = []
+            for i in range(-6, int(round(W / P)) * 24 + 7):
+                x = i * P / 24
+                a = TAU * x / P + ph
+                pts.append((x, cy + A * math.sin(a), .0075 + .0032 * math.cos(a)))
+            k.path(f'c{cols[s3]}', pts, rs, seg=8)
+    return k
+
 TILES = {
     'rack':    (rack_tile, 1.3, 1.6, 2048, .045),
     'panel':   (panel_tile, 2.2, 2.2, 2048, .04),
     'padding': (padding_tile, 1.5, 1.5, 1024, .07),
     'floor':   (floor_tile, 1.4, 1.4, 2048, .04),
     'rubber':  (rubber_tile, .4, .4, 1024, .03),
+    'braid':   (braid_tile, .3, 1.5, 1024, .03),
 }
 
 # ───────────────────────── Backen ─────────────────────────

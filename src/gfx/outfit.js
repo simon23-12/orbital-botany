@@ -140,7 +140,7 @@ export function loadWallTextures() {
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     res(t);
   }, undefined, () => res(null)));
-  return Promise.all(['rack', 'panel', 'padding', 'floor', 'rubber'].map(async name => {
+  return Promise.all(['rack', 'panel', 'padding', 'floor', 'rubber', 'braid'].map(async name => {
     const [map, normalMap, orm] = await Promise.all([one(name + '_albedo.jpg', true), one(name + '_normal.jpg'), one(name + '_orm.jpg')]);
     if (map && normalMap && orm) walls[name] = { map, normalMap, orm };
   }));
@@ -180,6 +180,54 @@ export function bakedTile(name) { return walls[name]; }
 /** Riffelblech; sizeU, sizeV = Meter, über die eine UV-Einheit reicht (1,4 m je Kachel). */
 export function floorMaterial(sizeU, sizeV, { side = THREE.FrontSide, tint = 0xffffff } = {}) {
   return wallMaterial('floor', { repeat: [sizeU / 1.4, sizeV / 1.4], side, tint, normal: 1.4 });
+}
+
+/**
+ * Runder, geflochtener Teppich: Die Zopfreihen der Kachel liegen als Ringe um
+ * die Mitte. Jeder Ring ist eine eigene Bahn, damit die Flechtperiode überall
+ * gleich lang bleibt. null, wenn die Kachel fehlt.
+ */
+export function braidedRug(radius = 1.5) {
+  const m = wallMaterial('braid', { repeat: [1, 1], normal: 1.6 });
+  if (!m) return null;
+  const ROW = .03, TILE_U = .3, TILE_V = 1.5, TOP = .012;
+  const pos = [], uv = [], idx = [];
+  const rings = Math.round(radius / ROW);
+  for (let i = 0; i < rings; i++) {
+    const r0 = i * ROW, r1 = (i + 1) * ROW;
+    const n = Math.max(1, Math.round(TAU * (r0 + r1) / 2 / TILE_U));
+    const seg = Math.max(12, n * 6);
+    const v0 = 1 - r0 / TILE_V, v1 = 1 - r1 / TILE_V;       // Kachelreihe i ↔ Ring i
+    // äußerster Ring fällt zur Kante hin ab
+    const y0 = TOP, y1 = i === rings - 1 ? TOP * .45 : TOP;
+    const b = pos.length / 3;
+    for (let k = 0; k <= seg; k++) {
+      const a = k / seg * TAU, c = Math.cos(a), s = Math.sin(a), u = k / seg * n;
+      pos.push(c * r0, y0, s * r0, c * r1, y1, s * r1);
+      uv.push(u, v0, u, v1);
+    }
+    for (let k = 0; k < seg; k++) {
+      const p = b + k * 2;
+      idx.push(p, p + 1, p + 3, p, p + 3, p + 2);
+    }
+  }
+  // gesäumte Außenkante
+  const b = pos.length / 3, seg = 160;
+  for (let k = 0; k <= seg; k++) {
+    const a = k / seg * TAU, c = Math.cos(a), s = Math.sin(a);
+    pos.push(c * radius, TOP * .45, s * radius, c * (radius + .004), 0, s * (radius + .004));
+    uv.push(k / seg * Math.round(TAU * radius / TILE_U), 1 - (radius - ROW / 2) / TILE_V, k / seg * Math.round(TAU * radius / TILE_U), 1 - (radius - ROW / 2) / TILE_V);
+  }
+  for (let k = 0; k < seg; k++) { const p = b + k * 2; idx.push(p, p + 1, p + 3, p, p + 3, p + 2); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  m.side = THREE.DoubleSide;
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 /** Gesteppte Polsterung der Lounge auf einer Halbschale von innen. */

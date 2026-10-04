@@ -141,7 +141,9 @@ er hängt in jedem Modul — und den verschraubten Bodenbelag mit
 Lüftungsgittern und Leitlicht — und die Stoffkatze „Laika": ein Plüschtier aus
 Metabällen mit Nähten, gestickter Nase, Sicherheitsaugen unter halb gesenkten
 Lidern und rotem Halsband, das auf der Fensterbank sitzt — und die karierte
-Wolldecke, die per Stoffsimulation über die Armlehne der Couch fällt. Die Umgebungsverdeckung wird mit Cycles in die
+Wolldecke, die per Stoffsimulation über die Armlehne der Couch fällt. Fürs
+Labor entstehen dort auch die Laborbänke: Phenolharzplatte mit Aluleiste und
+Sitzschienenlöchern, Aufkantung mit Steckdosen, Schubladen- und Türschränke. Die Umgebungsverdeckung wird mit Cycles in die
 Eckfarben gebacken. Ausgabe nach `assets/props/`:
 
 ```bash
@@ -154,7 +156,9 @@ Schubladen mit Bügelgriffen, Spinde mit Hebelschließen, Lüftungsgitter,
 Anschlussfelder, gepolsterte Nomex-Bezüge, Brandschutzports, Etiketten),
 verschraubte Wandpaneele für Stirnwände und Knoten, die gesteppte
 Polsterung der Lounge, das Riffelblech der Modulböden (mit
-Antirutschstreifen) und den Noppenbelag der Lounge als echte Geometrie. Cycles backt daraus je Kachel Farbe,
+Antirutschstreifen), den Noppenbelag der Lounge und einen geflochtenen Teppich
+aus dreisträngigen Zöpfen (im Spiel als Ringe um die Mitte gelegt) als echte
+Geometrie. Cycles backt daraus je Kachel Farbe,
 Normalen und eine ORM-Karte (Verdeckung, Rauheit, Metall) nach `assets/walls/`.
 Die Modulwand besteht aus zwei Halbschalen, damit die Racks auf beiden Seiten
 aufrecht stehen. Neu backen (gut fünf Minuten):

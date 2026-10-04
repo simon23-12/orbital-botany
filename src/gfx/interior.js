@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mats, floorTexture, fabricTexture } from './materials.js';
-import { rackMaterial, panelTexture, panelMaterial, paddingMaterial, floorMaterial, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
+import { rackMaterial, panelTexture, panelMaterial, paddingMaterial, floorMaterial, braidedRug, outfitMats, dressModule, handrail, stowageBag, laptop, camera, ledPanel, sign, cableRun, vent, softBox } from './outfit.js';
 import { buildPlant } from './plants3d.js';
 import { hasPlantModel } from './plantModels.js';
 import { hasProp, makeProp } from './props.js';
@@ -406,13 +406,19 @@ const ROOMS = {
       couch.add(bl);
     }
 
-    /* Teppich */
-    const rug = new THREE.Mesh(new THREE.CircleGeometry(1.5, 40),
-      new THREE.MeshStandardMaterial({ map: fabricTexture('#4a4036'), color: 0xa08a70, roughness: 1 }));
-    rug.rotation.x = -Math.PI / 2;
-    rug.position.set(0, -RAD * .72 + .045, -1.4);
-    rug.receiveShadow = true;
-    g.add(rug);
+    /* Teppich: geflochten, Zopfreihen in Ringen (Kachel aus tools/walls_blender.py) */
+    const braided = braidedRug(1.5);
+    if (braided) {
+      braided.position.set(0, FLOOR, -1.4);
+      g.add(braided);
+    } else {
+      const rug = new THREE.Mesh(new THREE.CircleGeometry(1.5, 40),
+        new THREE.MeshStandardMaterial({ map: fabricTexture('#4a4036'), color: 0xa08a70, roughness: 1 }));
+      rug.rotation.x = -Math.PI / 2;
+      rug.position.set(0, -RAD * .72 + .045, -1.4);
+      rug.receiveShadow = true;
+      g.add(rug);
+    }
 
     /* Beistelltisch */
     const table = new THREE.Group();
@@ -979,7 +985,16 @@ const ROOMS = {
     ];
 
     const benchMat = new THREE.MeshStandardMaterial({ color: 0xd4d8db, roughness: .35, metalness: .4 });
-    for (const side of [-1, 1]) {
+    // Laborbänke aus Blender: Bodenoberkante = Boden des Rumpfs + halbe Plattenstärke.
+    // Gegenüber endet die Bank vor dem Keimschrank.
+    const floorTop = -RAD * .72 + .04;
+    const benchA = makeProp('labbench'), benchB = makeProp('labbench_short');
+    if (benchA && benchB) {
+      benchA.position.set(0, floorTop, -1.3 + .05);
+      benchB.position.set(-.56, floorTop, 1.3 - .05); benchB.rotation.y = Math.PI;
+      g.add(benchA, benchB);
+    }
+    for (const side of (benchA && benchB) ? [] : [-1, 1]) {
       const b = new THREE.Mesh(new THREE.BoxGeometry(LEN * .82, .09, .72), benchMat);
       b.position.set(0, -.72, side * 1.3);
       b.castShadow = b.receiveShadow = true;
@@ -1023,15 +1038,17 @@ const ROOMS = {
     lid.position.set(.9, -.49, -1.3);
     g.add(lid);
     // Keimschrank
+    // Keimschrank steht auf dem Boden neben der kurzen Bank
+    const incDrop = benchA && benchB ? (-RAD * .72 + .04 + .75) - (-.4) : 0;
     const inc = new THREE.Mesh(new THREE.BoxGeometry(.9, 1.5, .55), M.hull);
-    inc.position.set(2.1, -.4, 1.35);
+    inc.position.set(2.1, -.4 + incDrop, 1.35);
     g.add(inc);
     const incGlass = new THREE.Mesh(new THREE.PlaneGeometry(.7, 1.1),
       new THREE.MeshPhysicalMaterial({ color: 0x2a4a3a, transmission: .5, roughness: .1, transparent: true, opacity: .75, emissive: 0x2a7a4a, emissiveIntensity: .45 }));
-    incGlass.position.set(2.1, -.35, 1.06);
+    incGlass.position.set(2.1, -.35 + incDrop, 1.06);
     g.add(incGlass);
     const incLight = new THREE.PointLight(0x4fd98a, 1.8, 3, 2);
-    incLight.position.set(2.1, -.35, .9);
+    incLight.position.set(2.1, -.35 + incDrop, .9);
     g.add(incLight);
 
     const s1 = screen(1.1, .62, .52); s1.position.set(-.4, -.05, 2.05); s1.rotation.y = Math.PI;

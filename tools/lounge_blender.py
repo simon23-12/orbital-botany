@@ -705,6 +705,81 @@ def build_blanket():
     pr._add_indexed('fabric', rim, [cols[k] * .8 for k in idx] * 2)
     return pr
 
+# ───────────────────────── Laborbank ─────────────────────────
+# Ursprung: Mitte der Bank auf Bodenhöhe, Vorderseite +Z (zum Gang).
+# Dunkle Phenolharzplatte, vorn eine Aluleiste mit Sitzschienenlöchern als Rand
+# gegen Wegtreiben, hinten eine Aufkantung mit Steckdosen. Darunter Schubladen-
+# und Türschränke mit Edelstahlgriffen über einem zurückgesetzten Sockel.
+
+def build_labbench(L=5.24, seed='lb'):
+    pr = Prop('labbench', ao=.85, ao_dist=.16, occluders=('floor',))
+    D, top = .72, .94
+    slate = lambda p, n: H(0x3a3e44) * (1 + .04 * nz(p, 5, 3) + .02 * nz(p, 40, 1))
+    # Arbeitsplatte mit gerundeter Vorderkante
+    pr.add('plastic', softbox(L, .036, D, .008, 3, (60, 1, 8)).xf(T(0, top - .018, 0)), slate)
+    # Aluleiste vorn: Profil mit Lochreihe im Zollraster
+    pr.add('metal', softbox(L - .02, .02, .028, .004, 2, (60, 1, 1)).xf(T(0, top + .01, D / 2 - .016)), H(0xa9adb2))
+    hole = lambda x: lathe([(1e-4, 0), (.0042, 0)], 10, cap_top=False).xf(T(x, top + .0202, D / 2 - .016))
+    x = -L / 2 + .03
+    while x < L / 2 - .03:
+        pr.add('rubber', hole(x), H(0x101114), smooth=False, ao=0)
+        x += .0254
+    # Aufkantung hinten mit Steckdosen
+    pr.add('paint', softbox(L, .13, .03, .006, 2, (60, 3, 1)).xf(T(0, top + .065, -D / 2 + .015)), H(0xd5d8db))
+    x = -L / 2 + .5
+    while x < L / 2 - .3:
+        plate = softbox(.12, .07, .012, .004, 2, (2, 2, 1)).xf(T(x, top + .06, -D / 2 + .036))
+        pr.add('plastic', plate, H(0xeeeeea), ao=.6)
+        for sx in (-.028, .028):
+            sk = lathe([(.017, 0), (.017, .004), (.012, .004), (.012, -.002)], 16).xf(T(x + sx, top + .06, -D / 2 + .043) @ RX(math.pi / 2))
+            pr.add('rubber', sk, H(0x2a2c30), ao=.5)
+        led = softbox(.006, .006, .004, .0015, 1, (1, 1, 1)).xf(T(x + .05, top + .085, -D / 2 + .043))
+        pr.add('glow', led, H(0x3adf7a), ao=0)
+        x += .9
+    # Korpus und Sockel
+    h = top - .036 - .1
+    pr.add('paint', softbox(L - .03, h, D - .12, .006, 2, (40, 4, 4)).xf(T(0, .1 + h / 2, -.05)), H(0xa7aeb5), ao=1)
+    pr.add('rubber', softbox(L - .1, .1, D - .26, .004, 1, (20, 1, 2)).xf(T(0, .05, -.1)), H(0x26282b))
+    # Fronten: Module von gut 0,7 m, abwechselnd Schubladen und Türen
+    n = max(1, round((L - .03) / .74))
+    mw = (L - .03) / n
+    fz = D / 2 - .11 + .011
+    R = lambda k, a=0.0, b=1.0: rnd(f'{seed}{k}', a, b)
+    white = lambda p, n: H(0xe2e5e8) * (1 + .015 * nz(p, 8, 2))
+    def handle(cx, cy, length, vertical=False):
+        if vertical:
+            pts = [Vector((cx, cy - length / 2, fz + .028)), Vector((cx, cy + length / 2, fz + .028))]
+            feet = [Vector((cx, cy - length / 2 + .01, fz)), Vector((cx, cy + length / 2 - .01, fz))]
+        else:
+            pts = [Vector((cx - length / 2, cy, fz + .028)), Vector((cx + length / 2, cy, fz + .028))]
+            feet = [Vector((cx - length / 2 + .01, cy, fz)), Vector((cx + length / 2 - .01, cy, fz))]
+        pr.add('metal', tube(pts, .0055, 10), H(0xb8bcc0), ao=.5)
+        for f0 in feet:
+            pr.add('metal', tube([f0, f0 + Vector((0, 0, .03))], .005, 8), H(0xa0a4a8), ao=.5)
+    for i in range(n):
+        x0 = -L / 2 + .015 + i * mw
+        cx = x0 + mw / 2
+        if i % 2 == 0:
+            ys = [.1, .3, .52, top - .036]
+            for j in range(3):
+                y0, y1 = ys[j] + .004, ys[j + 1] - .004
+                pr.add('paint', softbox(mw - .008, y1 - y0, .022, .005, 2, (6, 3, 1)).xf(T(cx, (y0 + y1) / 2, fz)), white)
+                handle(cx, y1 - .045, .22)
+                # Etikettenhalter
+                pr.add('metal', softbox(.08, .025, .004, .001, 1, (1, 1, 1)).xf(T(cx, y1 - .085, fz + .013)), H(0x9aa0a6), ao=.5)
+                pr.add('plastic', softbox(.07, .016, .002, .0005, 1, (1, 1, 1)).xf(T(cx, y1 - .085, fz + .0155)), H(0xf4f2ea), ao=.4)
+        else:
+            y0, y1 = .104, top - .04
+            for s in (-1, 1):
+                dx = cx + s * mw / 4
+                pr.add('paint', softbox(mw / 2 - .008, y1 - y0, .022, .005, 2, (3, 6, 1)).xf(T(dx, (y0 + y1) / 2, fz)), white)
+                handle(cx + s * .04, y1 - .16, .18, vertical=True)
+            # Lüftungsschlitze in der unteren Türhälfte (Kühlschrankmodul)
+            if R(f'v{i}') < .5:
+                for k in range(6):
+                    pr.add('rubber', softbox(mw * .6, .008, .004, .002, 1, (2, 1, 1)).xf(T(cx, .16 + k * .02, fz + .012)), H(0x3a3d42), ao=.4)
+    return pr
+
 # ───────────────────────── Feuerlöscher ─────────────────────────
 # Rückseite bei z = 0 (Wand), steht entlang +Y, Flasche mittig bei y = 0.
 
@@ -1181,7 +1256,8 @@ def pack(pr, buf):
     return {'posScale': 1 / q, 'uvScale': 1 / UV_Q, 'subs': subs}
 
 BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_extinguisher, 'floor_lounge': build_floor,
-            'cat': build_cat, 'blanket': build_blanket}
+            'cat': build_cat, 'blanket': build_blanket, 'labbench': build_labbench,
+            'labbench_short': lambda: build_labbench(4.12, 'lbs')}
 
 def export(ids=None):
     out = os.path.join(ROOT, 'assets', 'props')
