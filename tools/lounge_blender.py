@@ -780,6 +780,210 @@ def build_labbench(L=5.24, seed='lb'):
                     pr.add('rubber', softbox(mw * .6, .008, .004, .002, 1, (2, 1, 1)).xf(T(cx, .16 + k * .02, fz + .012)), H(0x3a3d42), ao=.4)
     return pr
 
+# ───────────────────────── Schlafkammer ─────────────────────────
+# Kabine wie die Crew Quarters der ISS: gut 2 m hoch, 1 m breit, 0,75 m tief,
+# innen gepolstert, eigene Lüftung, oben eine Leuchte. Ursprung: Mitte der
+# Kabinenöffnung auf Bodenhöhe; die Kabine reicht nach −Z, offen ist +Z.
+
+CQ_W, CQ_H, CQ_D, CQ_T = 1.0, 2.05, .75, .035
+
+def sleeping_bag(pr):
+    """Schlafsack an der Rückwand: oben eingehängt, gesteppte Kammern, Reißverschluss,
+    oben die Öffnung mit gepolstertem Kragen."""
+    nu, nv = 44, 110
+    L, y0 = 1.62, .2
+    zb = -CQ_D + CQ_T + .05
+    def w(v):
+        k = lerp(.44, .62, sm(0, .72, v)) - .1 * sm(.84, 1, v)
+        return k * (math.sqrt(max(0.0, 1 - ((v - .9) / .1) ** 2)) if v > .9 else 1) + .004
+    def d(u, v):
+        base = .09 * math.sin(math.pi * u) ** .55 * (.78 + .22 * sm(0, .35, v)) * (1 - .3 * sm(.86, 1, v))
+        baffle = 1 + .1 * math.cos(TAU * v * L / .13) * sm(.82, .76, v)
+        return base * baffle * sm(0, .05, v) * sm(1, .97, v)
+    OU, OV, RU, RV = .5, .855, .2, .052          # Öffnung im (u, v)-Raum
+    def opening(u, v): return ((u - OU) / RU) ** 2 + ((v - OV) / RV) ** 2
+    def P(u, v):
+        o = opening(u, v)
+        dip = .045 * sm(1.0, .3, o)                   # innen eingesunken: dort ist der Sack offen
+        return Vector(((u - .5) * w(v), y0 + v * L - .015 * math.sin(math.pi * u) * v, zb + max(.004, d(u, v) - dip)))
+    rows = [[P(i / nu, j / nv) for i in range(nu + 1)] for j in range(nv + 1)]
+    b = Block().quad_grid(rows)
+    blue, seam, zip_, inner = H(0x2c5a86), H(0x1e4064), H(0x3a3e44), H(0x161c26)
+    def col(p, n):
+        v = clamp((p.y - y0) / L); u = clamp(p.x / max(w(v), .01) + .5)
+        c = blue * (1 + .05 * nz(p, 30, 4))
+        c = mix(c, seam, sm(.035, 0, abs(((v * L / .13) % 1.0) - .5) - .465) * .7 * sm(.82, .76, v))
+        zu = .86 - .1 * v                             # Reißverschluss die rechte Seite hinab
+        c = mix(c, zip_, sm(.018, .006, abs(u - zu)) * sm(.15, .25, v) * sm(.8, .72, v))
+        return mix(c, inner, sm(1.0, .8, opening(u, v)))
+    pr.add('fabric', b, col)
+    # Kragen: gepolsterte Wulst rund um die Öffnung
+    ring = []
+    for k in range(41):
+        a = k * TAU / 40
+        u, v = OU + RU * 1.02 * math.cos(a), OV + RV * 1.05 * math.sin(a)
+        ring.append(P(u, v) + Vector((0, 0, .012)))
+    pr.add('fabric', tube(ring, .017, 10, caps=False), H(0x3c6c98))
+    # Aufhängeschlaufen oben an zwei Haken
+    for sx in (-.12, .12):
+        pr.add('metal', lathe([(.012, -.004), (.014, 0), (.012, .004)], 12).xf(T(sx, y0 + L + .06, zb + .01) @ RX(math.pi / 2)), H(0x9aa0a6), ao=.5)
+        pr.add('rubber', tube([Vector((sx, y0 + L - .03, zb + .02)), Vector((sx, y0 + L + .05, zb + .012))], .006, 6), H(0x2a2c30), ao=.5)
+
+def build_cq_booth(closed=False):
+    pr = Prop('cq_booth_closed' if closed else 'cq_booth', ao=.9, ao_dist=.25, occluders=('floor',))
+    W, Hh, D, t = CQ_W, CQ_H, CQ_D, CQ_T
+    shell = lambda p, n: H(0xe4e4df) * (1 + .02 * nz(p, 6, 1))
+    # Gehäuse: Seiten, Decke, Boden, Rückwand
+    pr.add('paint', softbox(t, Hh, D, .012, 2, (1, 12, 5)).xf(T(-W / 2 + t / 2, Hh / 2, -D / 2)), shell)
+    pr.add('paint', softbox(t, Hh, D, .012, 2, (1, 12, 5)).xf(T(W / 2 - t / 2, Hh / 2, -D / 2)), shell)
+    pr.add('paint', softbox(W, t, D, .012, 2, (6, 1, 5)).xf(T(0, Hh - t / 2, -D / 2)), shell)
+    pr.add('paint', softbox(W, t, D, .012, 2, (6, 1, 5)).xf(T(0, t / 2, -D / 2)), shell)
+    pr.add('paint', softbox(W, Hh, t, .012, 2, (6, 12, 1)).xf(T(0, Hh / 2, -D + t / 2)), shell)
+    # Rahmen der Öffnung
+    for x in (-W / 2 + .02, W / 2 - .02):
+        pr.add('metal', softbox(.04, Hh, .03, .006, 2, (1, 10, 1)).xf(T(x, Hh / 2, -.012)), H(0xa9adb2))
+    for y in (.02, Hh - .02):
+        pr.add('metal', softbox(W, .04, .03, .006, 2, (6, 1, 1)).xf(T(0, y, -.012)), H(0xa9adb2))
+    # Polsterung innen: Rückwand in Kissen, Seiten flacher
+    pad = fabric(H(0xc6ccd2), .06, 22, 9, welt=.3)
+    iw, ih = W - 2 * t - .01, Hh - 2 * t - .01
+    for i in range(2):
+        for j in range(5):
+            c = softbox(iw / 2 - .006, ih / 5 - .006, .04, .018, 3, (4, 4, 1), welt=2, welt_h=.003)
+            c.deform(puff(iw / 4, ih / 10, .012, axis='z'))
+            c.xf(T(-iw / 4 + i * iw / 2, t + .005 + ih / 10 + j * ih / 5, -D + t + .02))
+            pr.add('fabric', c, pad)
+    for sx in (-1, 1):
+        for j in range(4):
+            c = softbox(.025, ih / 4 - .008, D - t - .06, .01, 2, (1, 4, 4))
+            c.deform(puff(.0125, (D - t - .06) / 2, .006, axis='y'))
+            c.xf(T(sx * (W / 2 - t - .0125), t + .005 + ih / 8 + j * ih / 4, -D / 2 - .01))
+            pr.add('fabric', c, pad)
+    # Leuchte in der Decke, Lüftungsgitter oben (Zuluft) und unten (Abluft) an der rechten Wand
+    pr.add('glow', softbox(.5, .012, .18, .004, 1, (2, 1, 1)).xf(T(0, Hh - t - .008, -D / 2)), H(0xfff1dc), ao=0)
+    for y, n in ((Hh - .32, 5), (.28, 4)):
+        pr.add('rubber', softbox(.012, .16, .3, .004, 1, (1, 2, 3)).xf(T(W / 2 - t - .03, y, -D / 2)), H(0x2a2d32), ao=.4)
+        for k in range(n):
+            pr.add('metal', softbox(.008, .008, .28, .002, 1, (1, 1, 2)).xf(T(W / 2 - t - .036, y - .06 + k * .12 / (n - 1), -D / 2)), H(0x9aa0a6), ao=.4)
+    if closed:
+        # Faltschiebetür, geschlossen: Lamellen im Zickzack, Namensschild „Gast"
+        n = 8
+        rows = []
+        for k in range(n * 2 + 1):
+            x = -W / 2 + .04 + (W - .08) * k / (n * 2)
+            z = .012 + (.035 if k % 2 else 0)
+            rows.append([Vector((x, .05, z)), Vector((x, Hh - .05, z))])
+        door = Block().quad_grid([[r[0] for r in rows], [r[1] for r in rows]])
+        pr.add('plastic', door, lambda p, n: H(0xd8dbde) * (1 + .03 * nz(p, 10, 2)), smooth=False)
+        pr.add('metal', softbox(.03, .14, .02, .006, 2, (1, 2, 1)).xf(T(W / 2 - .09, Hh * .52, .06)), H(0xa0a4a8), ao=.5)
+        pr.add('plastic', softbox(.16, .05, .006, .002, 1, (2, 1, 1)).xf(T(0, Hh * .72, .052)), H(0xf2f0e8), ao=.4)
+        pr.add('rubber', softbox(.1, .008, .002, .001, 1, (1, 1, 1)).xf(T(0, Hh * .72 + .006, .056)), H(0x1c1c1e), ao=0)
+        return pr
+    # offen: Tür zur Seite gefaltet
+    for k in range(4):
+        x = -W / 2 + .03 + (k % 2) * .03
+        pr.add('plastic', softbox(.012, Hh - .1, .125, .004, 1, (1, 6, 2)).xf(T(x, Hh / 2, .07) @ RY((1 if k % 2 else -1) * .5)), H(0xd8dbde))
+    sleeping_bag(pr)
+    # Rückhaltegurte quer über dem Schlafsack, an den Seitenwänden verankert
+    zb = -D + t + .05
+    for y in (.72, 1.28):
+        pts = [Vector((-W / 2 + t, y, zb + .02)), Vector((-.25, y, zb + .1)), Vector((.25, y, zb + .1)), Vector((W / 2 - t, y, zb + .02))]
+        strap = Block()
+        strap.quad_grid([[p + Vector((0, -.02, 0)) for p in pts], [p + Vector((0, .02, 0)) for p in pts]])
+        pr.add('rubber', strap, H(0x3a3d42), smooth=False, ao=.6)
+        pr.add('metal', softbox(.05, .045, .012, .004, 2, (1, 1, 1)).xf(T(.25, y, zb + .104)), H(0x8a9096), ao=.4)
+    # Laptop an einer Klappkonsole links
+    lx = -W / 2 + t + .005
+    pr.add('metal', softbox(.02, .02, .3, .004, 1, (1, 1, 2)).xf(T(lx + .01, 1.2, -.3)), H(0x8a9096), ao=.5)
+    pr.add('plastic', softbox(.22, .012, .3, .004, 2, (2, 1, 2)).xf(T(lx + .12, 1.2, -.3)), H(0x2a2c30), ao=.5)
+    scr = softbox(.006, .2, .28, .003, 1, (1, 2, 2)).xf(T(lx + .23, 1.31, -.3) @ RZ(.25))
+    pr.add('plastic', scr, H(0x26282c), ao=.5)
+    pr.add('glow', softbox(.002, .17, .25, .001, 1, (1, 1, 1)).xf(T(lx + .227, 1.31, -.3) @ RZ(.25) @ T(-.003, 0, 0)), H(0x2a4a6a), ao=0)
+    return pr
+
+def build_q_fan():
+    """Leiser Lüfter, an der rechten Wand, zielt aufs Kopfende."""
+    pr = Prop('q_fan', ao=.8, ao_dist=.05)
+    W, D = CQ_W, CQ_D
+    xi = W / 2 - CQ_T - .025
+    M = T(xi - .06, 1.66, -.3) @ RY(-math.pi / 2 - .35) @ RX(.25)
+    pr.add('metal', softbox(.1, .03, .03, .005, 2, (2, 1, 1)).xf(T(xi - .012, 1.66, -.3) @ RY(math.pi / 2)), H(0x6a6e74), ao=.5)
+    ring = lathe([(.068, -.022), (.075, -.02), (.078, .0), (.075, .02), (.068, .022), (.064, .0)], 32).xf(M @ RX(math.pi / 2))
+    pr.add('plastic', ring, H(0x3a3d42))
+    hub = lathe([(1e-4, -.012), (.02, -.01), (.022, .006), (1e-4, .012)], 16, cap_bottom=True).xf(M @ RX(math.pi / 2))
+    pr.add('plastic', hub, H(0x2a2c30))
+    for k in range(7):
+        a = k * TAU / 7
+        bl = softbox(.052, .003, .022, .0012, 1, (2, 1, 1)).xf(M @ RZ(a) @ T(.045, 0, 0) @ RX(.5))
+        pr.add('plastic', bl, H(0xb8bcc0), ao=.6)
+    for k in range(8):
+        a = k * TAU / 8
+        pr.add('metal', tube([M @ Vector((0, 0, .024)), M @ Vector((math.cos(a) * .072, math.sin(a) * .072, .022))], .0012, 4), H(0xc0c4c8), ao=.4)
+    pr.add('metal', lathe([(.04, .0), (.042, .0), (.042, .002), (.04, .002)], 24).xf(M @ T(0, 0, .022) @ RX(math.pi / 2)), H(0xc0c4c8), ao=.4)
+    return pr
+
+def build_q_lamp():
+    """Leselampe mit Schwanenhals an der linken Wand, beugt sich übers Kopfende."""
+    pr = Prop('q_lamp', ao=.8, ao_dist=.05)
+    x0 = -CQ_W / 2 + CQ_T + .025
+    pr.add('plastic', softbox(.02, .07, .05, .006, 2, (1, 2, 1)).xf(T(x0 + .01, 1.5, -.18)), H(0x2a2c30))
+    pts = []
+    for i in range(13):
+        s = i / 12
+        pts.append(Vector((x0 + .02 + .2 * math.sin(s * 1.4), 1.5 + .22 * math.sin(s * 2.0), -.18 - .2 * s)))
+    pr.add('metal', tube(pts, [.0055 + .0012 * (k % 2) for k in range(13)], 8), H(0x8a8e94), ao=.5)
+    tip = pts[-1]
+    d = (pts[-1] - pts[-2]).normalized()
+    q = d.to_track_quat('Y', 'Z').to_matrix().to_4x4()
+    head = lathe([(.008, 0), (.018, .02), (.032, .06), (.034, .062)], 20).xf(Matrix.Translation(tip) @ q)
+    pr.add('plastic', head, H(0x3a3d42))
+    pr.add('glow', lathe([(1e-4, .055), (.03, .055)], 20, cap_top=False).xf(Matrix.Translation(tip) @ q), H(0xffd6a0), ao=0)
+    return pr
+
+def build_q_photos():
+    """Klettplatte mit drei Gummibändern an der rechten Wand — die Bilder setzt das Spiel ein."""
+    pr = Prop('q_photos', ao=.8, ao_dist=.04)
+    x = CQ_W / 2 - CQ_T - .025 - .006                 # vor der Seitenpolsterung
+    pr.add('fabric', softbox(.012, .3, .4, .006, 2, (1, 3, 4)).xf(T(x, 1.18, -.36)), H(0x3c3f44))
+    for y in (1.08, 1.19, 1.3):
+        pr.add('rubber', softbox(.006, .008, .41, .002, 1, (1, 1, 4)).xf(T(x - .012, y, -.36)), H(0x1c1c1e), ao=.5)
+    return pr
+
+def build_q_reader():
+    """E-Reader mit Klettband an der rechten Wand, unter den Fotos."""
+    pr = Prop('q_reader', ao=.8, ao_dist=.04)
+    x = CQ_W / 2 - CQ_T - .025 - .006
+    M = T(x, .9, -.2) @ RX(.08)
+    pr.add('plastic', softbox(.01, .17, .125, .006, 2, (1, 2, 2)).xf(M), H(0x2c2d30))
+    paper = lambda p, n: H(0xd8d6ce)
+    pr.add('plastic', softbox(.002, .13, .095, .001, 1, (1, 2, 2)).xf(M @ T(-.0055, .01, 0)), paper, ao=.3)
+    for k in range(9):
+        L = .07 if k % 4 != 3 else .04
+        pr.add('rubber', softbox(.001, .003, L, .0005, 1, (1, 1, 1)).xf(M @ T(-.0068, .06 - k * .012, -(.08 - L) / 2)), H(0x4a4a4a), ao=0)
+    pr.add('rubber', softbox(.004, .025, .16, .002, 1, (1, 1, 2)).xf(M @ T(-.008, -.04, 0)), H(0x2a3a5a), ao=.5)
+    return pr
+
+def build_q_mask():
+    """Schlafmaske am Haken über dem Kopfende, daneben die Dose mit den Ohrstöpseln."""
+    pr = Prop('q_mask', ao=.8, ao_dist=.04)
+    zb = -CQ_D + CQ_T + .07
+    rows = []
+    for j in range(5):
+        v = j / 4
+        row = []
+        for i in range(17):
+            u = i / 16 * 2 - 1
+            x = u * .1
+            y = 1.92 - .045 * v - .012 * u * u + .008 * (1 - u * u) * (v > .5)
+            z = zb + .02 * (1 - u * u) + .004 * math.sin(v * math.pi)
+            row.append(Vector((x + .12, y, z)))
+        rows.append(row)
+    pr.add('fabric', Block().quad_grid(rows), lambda p, n: H(0x1e2a44) * (1 + .05 * nz(p, 40, 3)))
+    pr.add('rubber', tube([Vector((.02, 1.9, zb)), Vector((.12, 1.95, zb - .005)), Vector((.22, 1.9, zb))], .002, 4), H(0x1a1a1c), ao=.5)
+    case = lathe([(1e-4, 0), (.016, 0), (.017, .004), (.017, .022), (.016, .026), (1e-4, .026)], 20).xf(T(-.18, 1.86, zb + .005) @ RX(math.pi / 2))
+    pr.add('plastic', case, H(0xe07a1e))
+    return pr
+
 # ───────────────────────── Feuerlöscher ─────────────────────────
 # Rückseite bei z = 0 (Wand), steht entlang +Y, Flasche mittig bei y = 0.
 
@@ -1257,7 +1461,9 @@ def pack(pr, buf):
 
 BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_extinguisher, 'floor_lounge': build_floor,
             'cat': build_cat, 'blanket': build_blanket, 'labbench': build_labbench,
-            'labbench_short': lambda: build_labbench(4.12, 'lbs')}
+            'labbench_short': lambda: build_labbench(4.12, 'lbs'),
+            'cq_booth': build_cq_booth, 'cq_booth_closed': lambda: build_cq_booth(True),
+            'q_fan': build_q_fan, 'q_lamp': build_q_lamp, 'q_photos': build_q_photos, 'q_reader': build_q_reader, 'q_mask': build_q_mask}
 
 def export(ids=None):
     out = os.path.join(ROOT, 'assets', 'props')

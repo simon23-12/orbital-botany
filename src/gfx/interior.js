@@ -157,6 +157,46 @@ function tray(size = 0.58, withLamp = true) {
   return g;
 }
 
+/** Gemalter Abzug mit weißem Rand: Meer bei Sonnenuntergang, Berge, eine Wiese. */
+const _photos = new Map();
+function photoTexture(kind) {
+  if (_photos.has(kind)) return _photos.get(kind);
+  const c = document.createElement('canvas');
+  c.width = 176; c.height = 214;
+  const x = c.getContext('2d');
+  x.fillStyle = '#f4f1e8'; x.fillRect(0, 0, 176, 214);
+  const W = 156, Hh = 156, ox = 10, oy = 10;
+  x.save(); x.beginPath(); x.rect(ox, oy, W, Hh); x.clip();
+  const sky = (a, b, h = Hh) => { const gr = x.createLinearGradient(0, oy, 0, oy + h); gr.addColorStop(0, a); gr.addColorStop(1, b); x.fillStyle = gr; x.fillRect(ox, oy, W, h); };
+  if (kind === 'sea') {
+    sky('#f2a65a', '#f7d9a6', Hh * .62);
+    x.fillStyle = '#ffe9b0'; x.beginPath(); x.arc(ox + W * .62, oy + Hh * .55, 13, 0, TAU); x.fill();
+    const sea = x.createLinearGradient(0, oy + Hh * .6, 0, oy + Hh); sea.addColorStop(0, '#4a6a8a'); sea.addColorStop(1, '#22364c');
+    x.fillStyle = sea; x.fillRect(ox, oy + Hh * .6, W, Hh * .4);
+    x.fillStyle = 'rgba(255,214,150,.6)';
+    for (let i = 0; i < 9; i++) x.fillRect(ox + W * .55 + Math.sin(i) * 8, oy + Hh * (.63 + i * .035), 22 - i * 2, 2);
+  } else if (kind === 'alps') {
+    sky('#5f97d0', '#cfe2f2');
+    const ridge = (col, base, amp, seed) => {
+      x.fillStyle = col; x.beginPath(); x.moveTo(ox, oy + Hh);
+      for (let i = 0; i <= 16; i++) x.lineTo(ox + i * W / 16, oy + base - amp * Math.abs(Math.sin(i * 1.3 + seed)) - (i % 3) * 3);
+      x.lineTo(ox + W, oy + Hh); x.fill();
+    };
+    ridge('#8a9aac', Hh * .55, 40, 1); ridge('#f4f6f8', Hh * .52, 22, 1.4); ridge('#4a6a4a', Hh * .8, 18, 2.3); ridge('#36553a', Hh * .95, 12, 3.1);
+  } else {
+    sky('#8ec2ea', '#e8f2f8', Hh * .55);
+    x.fillStyle = '#6fa64a'; x.fillRect(ox, oy + Hh * .55, W, Hh * .45);
+    for (let i = 0; i < 60; i++) { x.fillStyle = ['#f2d24a', '#ffffff', '#d85a7a'][i % 3]; x.fillRect(ox + (i * 37) % W, oy + Hh * .62 + (i * 23) % (Hh * .36), 3, 3); }
+    x.fillStyle = '#5a3a24'; x.fillRect(ox + W * .28, oy + Hh * .32, 7, Hh * .3);
+    x.fillStyle = '#3f7a34'; x.beginPath(); x.arc(ox + W * .3, oy + Hh * .3, 26, 0, TAU); x.fill();
+  }
+  x.restore();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  _photos.set(kind, t);
+  return t;
+}
+
 /* ───────────────────────── Raumdefinitionen ───────────────────────── */
 
 /** Gepolsterte, warme Wandbespannung für die Lounge. */
@@ -1066,6 +1106,67 @@ const ROOMS = {
     return g;
   },
 
+  /* ══ SCHLAFKAMMER ══ */
+  quarters(st, ctx, modId, ports = {}) {
+    const M = mats();
+    const g = new THREE.Group();
+    const LEN = 4.4, RAD = 2.3;
+    g.add(shell(LEN, RAD, M, { color: 0xf2f0ec, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ceiling', 'upper', 'ends'], bags: 4, seed: 71,
+      neg: { to: ports.nearName }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.72], [BIG, BIG, .8])]];
+    const floorTop = -RAD * .72 + .04;
+
+    /* Zwei Kabinen an der Wand: links deine (offen), rechts die Gästekabine */
+    const own = makeProp('cq_booth'), guest = makeProp('cq_booth_closed');
+    if (own && guest) {
+      own.position.set(-.58, floorTop, -.8);
+      guest.position.set(.58, floorTop, -.8);
+      g.add(own, guest);
+      // Ausstattung, die mit der Fracht gekommen ist
+      for (const id of ['q_mask', 'q_fan', 'q_lamp', 'q_photos', 'q_reader']) {
+        if (!st.comfort.includes(id)) continue;
+        const p = makeProp(id);
+        if (p) own.add(p);
+      }
+      if (st.comfort.includes('q_photos')) {
+        const scenes = ['sea', 'alps', 'meadow'];
+        scenes.forEach((k, i) => {
+          const ph = new THREE.Mesh(new THREE.PlaneGeometry(.088, .107),
+            new THREE.MeshStandardMaterial({ map: photoTexture(k), roughness: .55 }));
+          ph.rotation.y = -Math.PI / 2;
+          ph.rotateZ((i - 1) * .12 + .04);
+          // knapp vor der Klettplatte, unter den Gummibändern
+          ph.position.set(.426, 1.18 + (i === 1 ? .04 : -.03), -.36 + (i - 1) * .12);
+          own.add(ph);
+        });
+      }
+      // Kabinenleuchte; mit Leselampe zusätzlich ein warmer Kegel übers Kopfende
+      const cl = new THREE.PointLight(0xfff0dc, .7, 2.6, 2);
+      cl.position.set(0, 1.9, -.38); own.add(cl);
+      if (st.comfort.includes('q_lamp')) {
+        const rl = new THREE.PointLight(0xffbf78, 1.3, 1.7, 2);
+        rl.position.set(-.2, 1.64, -.36); own.add(rl);
+      }
+    } else {
+      for (const x of [-.58, .58]) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(1, 2.05, .75), M.hull);
+        b.position.set(x, floorTop + 1.025, -1.175);
+        g.add(b);
+      }
+    }
+
+    g.add(makeStrip(LEN * .7, 0, RAD * .8, 0, 0xffe6c8, .45));
+    g.add(new THREE.HemisphereLight(0xf0e2cc, 0x3a342c, 1.0));
+    g.add(new THREE.AmbientLight(0x8a7c6a, .5));
+    const fill = new THREE.PointLight(0xffe8cc, 1.2, LEN * 1.3, 2);
+    fill.position.set(0, -.2, .4);
+    g.add(fill);
+    ctx.camera = { pos: new THREE.Vector3(LEN * .32, .1, .62), look: new THREE.Vector3(-.6, -.55, -1.3) };
+    return g;
+  },
+
   /* ══ TECHNIK ══ */
   systems(st, ctx, modId, ports = {}) {
     const M = mats();
@@ -1251,7 +1352,7 @@ const CHAINS = [
   { key: '+x', dir: new THREE.Vector3(1, 0, 0), ids: ['grow_a', 'lab', 'vertical'] },
   { key: '-x', dir: new THREE.Vector3(-1, 0, 0), ids: ['systems', 'cargo'] },
   { key: '+z', dir: new THREE.Vector3(0, 0, 1), ids: ['lounge'] },
-  { key: '-z', dir: new THREE.Vector3(0, 0, -1), ids: ['hydro', 'mycology'] },
+  { key: '-z', dir: new THREE.Vector3(0, 0, -1), ids: ['quarters', 'hydro', 'mycology'] },
   { key: '-y', dir: new THREE.Vector3(0, -1, 0), ids: ['cupola'] },
   { key: '+y', dir: new THREE.Vector3(0, 1, 0), ids: ['dome'] },
 ];
@@ -1271,6 +1372,7 @@ function buildRoom(id, st, ctx, ports) {
   if (id === 'lab') return ROOMS.lab(st, ctx, id, ports);
   if (id === 'systems') return ROOMS.systems(st, ctx, id, ports);
   if (id === 'cargo') return ROOMS.cargo(st, ctx, id, ports);
+  if (id === 'quarters') return ROOMS.quarters(st, ctx, id, ports);
   if (def && (def.slots || st.modules[id]?.slots)) return ROOMS.grow(st, ctx, id, ports);
   return ROOMS.lab(st, ctx, id, ports);
 }

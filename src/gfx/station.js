@@ -14,7 +14,8 @@ export const PITCH = 28 * Math.PI / 180;
 
 /* Position, Ausrichtung und Größe jedes Moduls am Gerüst.
  * −Y zeigt zur Erde, +Y zum Zenit. Die Anordnung entspricht dem begehbaren
- * Innenraum: Cupola unter dem Knoten, Pilzkammer hinter der Hydroponik. */
+ * Innenraum: Cupola unter dem Knoten, an −Z erst die Schlafkammer, dann
+ * Hydroponik und Pilzkammer. */
 export const LAYOUT = {
   cargo:    { pos: [-11.5, 0, 0], len: 4.2, rad: 1.5, axis: 'x', color: 0xcfd3d6 },
   systems:  { pos: [-5.6, 0, 0], len: 5.6, rad: 1.85, axis: 'x', color: 0xe6e8e4 },
@@ -22,8 +23,9 @@ export const LAYOUT = {
   cupola:   { pos: [0, -1.75, 0], len: 1.9, rad: 1.5, axis: 'y', color: 0xdfe6ec, cupola: true },
   grow_a:   { pos: [5.6, 0, 0], len: 5.6, rad: 1.85, axis: 'x', color: 0xeef0ea },
   lab:      { pos: [11.4, 0, 0], len: 5.0, rad: 1.7, axis: 'x', color: 0xe4e8ea },
-  hydro:    { pos: [0, 0, -5.6], len: 5.4, rad: 1.9, axis: 'z', color: 0xdfeaf0 },
-  mycology: { pos: [0, 0, -10.3], len: 3.4, rad: 1.4, axis: 'z', color: 0x9aa0a6 },
+  quarters: { pos: [0, 0, -4.5], len: 3.6, rad: 1.7, axis: 'z', color: 0xe9e6df },
+  hydro:    { pos: [0, 0, -9.6], len: 5.4, rad: 1.9, axis: 'z', color: 0xdfeaf0 },
+  mycology: { pos: [0, 0, -14.3], len: 3.4, rad: 1.4, axis: 'z', color: 0x9aa0a6 },
   vertical: { pos: [16.8, 0, 0], len: 7.4, rad: 2.5, axis: 'x', color: 0xeaece8 },
   dome:     { pos: [0, 4.6, 0], len: 3.0, rad: 2.6, axis: 'y', color: 0xdfe8ee, dome: true },
 };

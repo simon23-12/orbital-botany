@@ -2,6 +2,7 @@
 import { clamp01, lerp, rng, hash, TAU } from '../core/util.js';
 
 const P = {
+  bed: 'M3 19V6M3 15h18v4M21 15v-3a3 3 0 00-3-3h-8v6M6.5 12.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z',
   couch: 'M3 12v-2a3 3 0 013-3h12a3 3 0 013 3v2M2 12h20v5H2zM5 17v2M19 17v2M6 12V9M18 12V9',
   sprout: 'M12 21v-8M12 13c0-4 3-7 8-7 0 4-3 7-8 7zM12 15c0-3-2.5-5.5-6.5-5.5C5.5 13 8 15 12 15z',
   flask: 'M9 3h6M10 3v6L4.6 18.2A2 2 0 006.3 21h11.4a2 2 0 001.7-2.8L14 9V3M7.5 14h9',

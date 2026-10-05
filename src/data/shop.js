@@ -52,7 +52,26 @@ export const COMFORT = [
     perk: 'Chris Hadfield hatte auch eine.', effect: { mood: 2, music: 1 } },
 ];
 
-export const CATALOG = [...SUPPLIES, ...COMFORT];
+/*  Ausstattung der Schlafkammer — braucht das Modul und steht danach in deiner Kabine. */
+export const QUARTERS = [
+  { id: 'q_mask', cat: 'Schlafkammer', name: 'Schlafmaske & Ohrstöpsel', icon: 'moon', price: 160, mass: 0.1, level: 3, room: 'quarters',
+    desc: 'Sechzehn Sonnenaufgänge am Tag und ein Grundrauschen von gut 60 dB aus Pumpen und Lüftern — beides kommt sonst durch.',
+    perk: 'Schläft sich deutlich ruhiger.', effect: { mood: 1 } },
+  { id: 'q_fan', cat: 'Schlafkammer', name: 'Leiser Kabinenlüfter', icon: 'wind', price: 380, mass: 0.8, level: 3, room: 'quarters',
+    desc: 'Bürstenloser Lüfter mit großem Rotor, zielt aufs Kopfende. Bewegt dieselbe Luft bei halber Drehzahl und halbem Lärm.',
+    perk: 'Keine CO₂-Blase mehr vor dem Gesicht.', effect: { mood: 1 } },
+  { id: 'q_lamp', cat: 'Schlafkammer', name: 'Leselampe mit Schwanenhals', icon: 'lamp', price: 520, mass: 0.6, level: 4, room: 'quarters',
+    desc: 'Warmweiß, stufenlos dimmbar. Die ISS hat 2016 auf einstellbare LED-Leuchten umgestellt: abends weniger Blau, damit der Körper Melatonin bildet.',
+    perk: 'Abends warmes Licht in der Kabine.', effect: { mood: 1 } },
+  { id: 'q_photos', cat: 'Schlafkammer', name: 'Fotos von zu Hause', icon: 'home', price: 240, mass: 0.2, level: 3, room: 'quarters',
+    desc: 'Abzüge unter Gummibändern auf einer Klettplatte. Fast jede Raumfahrerin, fast jeder Raumfahrer nimmt so etwas mit.',
+    perk: 'Gegen das Heimweh.', effect: { mood: 2 } },
+  { id: 'q_reader', cat: 'Schlafkammer', name: 'E-Reader', icon: 'book', price: 650, mass: 0.3, level: 5, room: 'quarters',
+    desc: 'Mit Klettband an der Kabinenwand. E-Ink leuchtet nicht selbst — ideal vor dem Einschlafen.',
+    perk: 'Ein paar tausend Bücher an Bord.', effect: { mood: 1 } },
+];
+
+export const CATALOG = [...SUPPLIES, ...COMFORT, ...QUARTERS];
 export const SHOP_BY_ID = Object.fromEntries(CATALOG.map(i => [i.id, i]));
 
 /** Frachtkosten: pauschal plus Massenzuschlag — Startkosten sind real der größte Posten. */

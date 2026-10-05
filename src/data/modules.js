@@ -39,6 +39,12 @@ export const MODULES = [
     desc: 'Andockpunkt für die Versorgungskapseln von Baikonur und Kourou.',
   },
   {
+    id: 'quarters', name: 'Schlafkammer', short: 'Schlafen', icon: 'bed', order: 7,
+    slots: 0, power: 80, start: false, cost: 3200, level: 3, buildHours: 8,
+    desc: 'Zwei Schlafkabinen wie auf der ISS: je ein Schlafsack an der Wand, Polsterung gegen den Lärm, eigene Lüftung. Eine Kabine ist deine, die zweite steht für Gäste bereit.',
+    fact: 'Ohne Schwerkraft steigt warme Luft nicht auf — es gibt keine Konvektion. Ausgeatmetes CO₂ bleibt als Blase vor dem Gesicht stehen, wer ohne Lüfter schläft, wacht mit Kopfschmerzen auf. Jede Schlafkabine der ISS hat deshalb einen eigenen Ventilator, und rund 2 m³ Platz: etwa eine Telefonzelle.',
+  },
+  {
     id: 'hydro', name: 'Hydroponik-Modul', short: 'Hydro', icon: 'droplets', order: 7,
     slots: 8, power: 420, start: false, cost: 4800, level: 4, buildHours: 10,
     desc: 'Nährfilmtechnik in zwei Etagen. Wurzeln hängen in einem dünnen, ständig umgewälzten Nährlösungsfilm.',

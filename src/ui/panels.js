@@ -7,7 +7,7 @@ import * as A from '../game/actions.js';
 import { PLANTS, BY_ID as PL, cycleMs, stageAt, stagesOf, pollenWindow, GROWTH_FACTOR, TRAY_AREA } from '../data/plants.js';
 import { MODULES, MOD_BY_ID } from '../data/modules.js';
 import { RESEARCH, RES_BY_ID, BRANCHES } from '../data/research.js';
-import { CATALOG, SHOP_BY_ID, SUPPLIES, COMFORT, freightFor } from '../data/shop.js';
+import { CATALOG, SHOP_BY_ID, SUPPLIES, COMFORT, QUARTERS, freightFor } from '../data/shop.js';
 import { openMail, personOf, markAllRead, unread } from '../game/mail.js';
 import { solar, PERIOD, V_ORB, ALT, A as ORBIT_A, BETA_CRIT, beta, EARTH_ANGULAR, HORIZON, distanceTravelled, orbits, eclipseFraction, groundTrack, groundHeading, regionAt, formatCoords } from '../core/orbit.js';
 import { sfx } from '../audio/sfx.js';
@@ -101,7 +101,7 @@ export function lounge(app, arg, UI) {
       class: 'card', style: { width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '.7rem', cursor: fn ? 'pointer' : 'default' },
       onclick: fn || (() => {}),
     },
-      el('span', { html: icon(ic), style: { color: `var(--${kind === 'ok' ? 'leaf' : kind === 'warn' ? 'amber' : kind === 'bad' ? 'bad' : 'cyan'})`, display: 'flex', flex: 'none' } }),
+      el('span', { class: 'card__ic', html: icon(ic), style: { color: `var(--${kind === 'ok' ? 'leaf' : kind === 'warn' ? 'amber' : kind === 'bad' ? 'bad' : 'cyan'})` } }),
       el('span', { text, style: { flex: '1', fontSize: '.88rem' } }),
       fn ? el('span', { html: icon('check'), style: { opacity: .4, display: 'flex' } }) : null,
     ));
@@ -121,7 +121,7 @@ export function lounge(app, arg, UI) {
   ));
 
   /* Stimmung */
-  const comfortNames = st.comfort.map(c => SHOP_BY_ID[c]?.name).filter(Boolean);
+  const comfortNames = st.comfort.map(c => SHOP_BY_ID[c]).filter(it => it && !it.room).map(it => it.name);
   body.push(secT('Persönliches'));
   body.push(el('div', { class: 'card' },
     el('p', { class: 'card__d', html: comfortNames.length
@@ -142,6 +142,52 @@ export function lounge(app, arg, UI) {
 }
 
 /* ───────────────────────── CUPOLA ───────────────────────── */
+
+/* ───────────────────────── SCHLAFKAMMER ───────────────────────── */
+export function quarters(app, arg, UI) {
+  const st = app.st;
+  const now = Date.now();
+  const sol = solar(now);
+  const body = [];
+  const owned = QUARTERS.filter(it => st.comfort.includes(it.id));
+  body.push(el('div', { class: 'card' },
+    el('p', { class: 'card__d', style: { margin: 0 }, html: owned.length === QUARTERS.length
+      ? 'Deine Kabine ist vollständig eingerichtet. Schlafsack zu, Maske auf, Lüfter summt.'
+      : 'Deine Kabine ist die linke. Der Schlafsack hängt an der Rückwand, zwei Gurte halten dich nachts fest — sonst treibt man im Schlaf langsam gegen die Lüftung.' })));
+
+  body.push(secT(`Ausstattung · ${owned.length} / ${QUARTERS.length}`));
+  for (const it of QUARTERS) {
+    const have = st.comfort.includes(it.id);
+    const coming = !have && (st.orders || []).some(o => !o.done && o.items[it.id]);
+    body.push(el('div', { class: 'card', style: { display: 'flex', alignItems: 'center', gap: '.7rem' } },
+      el('span', { class: 'card__ic', html: icon(it.icon), style: { color: have ? 'var(--leaf)' : 'var(--ink-faint)' } }),
+      el('div', { style: { flex: 1, minWidth: 0 } },
+        el('b', { text: it.name, style: { fontSize: '.9rem' } }),
+        el('p', { class: 'card__d', style: { margin: '.15rem 0 0', fontSize: '.8rem' }, text: have ? it.perk : it.desc })),
+      have ? el('span', { class: 'chip chip--leaf', text: 'an Bord' })
+        : coming ? el('span', { class: 'chip chip--cyan', text: 'im Anflug' })
+        : el('span', { class: 'chip', text: (it.level || 1) > st.level ? `Stufe ${it.level}` : num(it.price) + ' Cr' }),
+    ));
+  }
+
+  body.push(secT('Schlafen im Orbit'));
+  const free = Math.abs(beta(now)) > BETA_CRIT;
+  body.push(el('div', { class: 'card' },
+    kv('Sonnenaufgänge pro Tag', `${(86400000 / PERIOD).toFixed(1)}`, '<b>Ein Umlauf dauert 96 Minuten</b>Wer acht Stunden schläft, verschläft rund fünf Sonnenaufgänge.'),
+    kv('Draußen gerade', free ? 'Dauersonne' : sol.lit ? 'Tag' : 'Erdschatten'),
+    kv('Geplante Schlafzeit', '8,5 h', '<b>Dienstplan der ISS</b>8,5 Stunden sind eingeplant. Gemessen schlafen Crews im Mittel rund 6 Stunden.'),
+  ));
+  body.push(hint('Im Schlaf treiben die Arme nach vorn und schweben in Schulterhöhe — die „neutrale Haltung" der Schwerelosigkeit. Viele binden sie deshalb locker im Schlafsack fest.', 'moon'));
+
+  return panel({
+    title: 'Schlafkammer', sub: 'Modul · Ruhe', icon: 'bed', narrow: true, body,
+    foot: [
+      el('button', { class: 'btn btn--sm btn--ghost', onclick: () => UI.close(), html: icon('x') + 'Nur schauen' }),
+      el('span', { style: { flex: 1 } }),
+      el('button', { class: 'btn btn--sm', onclick: () => UI.open('shop', 'Schlafkammer'), html: icon('box') + 'Ausstattung bestellen' }),
+    ],
+  });
+}
 
 export function cupola(app, arg, UI) {
   const st = app.st, now = Date.now();
@@ -515,6 +561,7 @@ export function shop(app, tab, UI) {
     { id: 'Saatgut', label: 'Saatgut' },
     { id: 'Verbrauch', label: 'Verbrauch' },
     { id: 'Komfort', label: 'Komfort' },
+    { id: 'Schlafkammer', label: 'Schlafkammer' },
   ];
 
   if (tab === 'Saatgut') {
@@ -532,10 +579,14 @@ export function shop(app, tab, UI) {
       }));
     }
   } else {
-    const list = tab === 'Verbrauch' ? SUPPLIES : COMFORT;
+    const list = tab === 'Verbrauch' ? SUPPLIES : tab === 'Schlafkammer' ? QUARTERS : COMFORT;
+    const hasQ = !!st.modules.quarters?.built;
     if (tab === 'Komfort') body.push(hint('Diese Dinge stehen danach sichtbar in deiner Lounge. Sie kosten Frachtmasse und bringen keinen Ertrag — bis auf die kleinen Vorteile, die dabeistehen.', 'leaf'));
+    if (tab === 'Schlafkammer') body.push(hint(hasQ
+      ? 'Alles hier kommt in deine Schlafkabine und ist dort zu sehen, sobald die Kapsel angedockt hat.'
+      : 'Erst braucht es die Schlafkammer — sie lässt sich im Ausbau bestellen. Danach kann hier die Kabine ausgestattet werden.', 'moon'));
     for (const it of list) {
-      const locked = (it.level || 1) > st.level || (it.needs && !S.hasRes(st, it.needs));
+      const locked = (it.level || 1) > st.level || (it.needs && !S.hasRes(st, it.needs)) || (it.room && !st.modules[it.room]?.built);
       const owned = it.perk && st.comfort.includes(it.id);
       body.push(shopRow(app, UI, {
         id: it.id, name: it.name, price: it.price, locked, level: it.level || 1, owned,

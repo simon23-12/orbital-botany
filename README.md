@@ -65,7 +65,7 @@ Alles läuft ohne Server, ohne Build-Schritt, ohne Konto.
 Die Station ist begehbar. Alle gebauten Module hängen an einem Knoten in der
 Mitte und sind durch Luken verbunden: in Flugrichtung Gewächsraum, Labor und
 Vertikalfarm, dagegen Technik und Frachtschleuse, seitlich die Lounge mit dem
-Panoramafenster, gegenüber Hydroponik und Pilzkammer, unten zur Erde die
+Panoramafenster, gegenüber Schlafkammer, Hydroponik und Pilzkammer, unten zur Erde die
 **Cupola**, oben das Kuppelgewächshaus. Man schwebt frei hindurch —
 schwerelos, aber mit aufrechtem Blick.
 
@@ -78,6 +78,13 @@ Die Cupola ist der ISS-Aussichtskuppel nachempfunden: sechs trapezförmige
 Seitenfenster um eine runde Mittelscheibe, dazwischen nur Rahmen — der Blick
 nach draußen ist rundum frei. Von dort lassen sich Aufnahmen der überflogenen
 Region machen, die das Erdbeobachtungsprogramm vergütet.
+
+Die **Schlafkammer** (ab Stufe 3) hat zwei Kabinen nach dem Vorbild der ISS-Crew-
+Quarters: gepolstert, mit eigener Lüftung — ohne Konvektion bliebe ausgeatmetes
+CO₂ als Blase vor dem Gesicht stehen — und einem Schlafsack, der mit zwei Gurten
+an der Rückwand hängt. Im Katalogreiter „Schlafkammer“ lassen sich Schlafmaske,
+leiser Lüfter, Leselampe, Fotos von zu Hause und ein E-Reader hochfliegen; alles
+erscheint nach dem Andocken sichtbar in der Kabine.
 
 ### Lokal starten
 
@@ -143,7 +150,8 @@ Metabällen mit Nähten, gestickter Nase, Sicherheitsaugen unter halb gesenkten
 Lidern und rotem Halsband, das auf der Fensterbank sitzt — und die karierte
 Wolldecke, die per Stoffsimulation über die Armlehne der Couch fällt. Fürs
 Labor entstehen dort auch die Laborbänke: Phenolharzplatte mit Aluleiste und
-Sitzschienenlöchern, Aufkantung mit Steckdosen, Schubladen- und Türschränke. Die Umgebungsverdeckung wird mit Cycles in die
+Sitzschienenlöchern, Aufkantung mit Steckdosen, Schubladen- und Türschränke —
+sowie die Schlafkabinen samt Schlafsack und die fünf Ausstattungsstücke. Die Umgebungsverdeckung wird mit Cycles in die
 Eckfarben gebacken. Ausgabe nach `assets/props/`:
 
 ```bash

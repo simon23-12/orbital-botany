@@ -241,6 +241,8 @@ svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-l
 .btn:active:not(:disabled){transform:translateY(0)}
 .btn:disabled{opacity:.38;cursor:not-allowed}
 .btn svg{width:16px;height:16px}
+.card__ic{display:flex;flex:none}
+.card__ic svg{width:20px;height:20px}
 .btn--primary{background:var(--leaf);color:#04140c;border-color:transparent;font-weight:500}
 .btn--primary:hover:not(:disabled){background:#7ae8a5;box-shadow:0 6px 24px rgba(95,217,142,.3)}
 .btn--cyan{background:var(--cyan);color:#021420;border-color:transparent;font-weight:500}

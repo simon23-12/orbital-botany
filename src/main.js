@@ -280,6 +280,7 @@ const app = {
   roomPanel(id) {
     if (!MOD_BY_ID[id]) return null;
     return id === 'lounge' ? 'lounge'
+      : id === 'quarters' ? 'quarters'
       : id === 'cupola' ? 'cupola'
       : id === 'lab' ? 'research'
       : id === 'systems' ? 'systems'

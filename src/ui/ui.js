@@ -72,7 +72,7 @@ export const UI = {
   buildRooms() {
     const app = this.app, st = app.st;
     const box = clear(this.els.rooms);
-    const order = ['lounge', 'cupola', 'grow_a', 'hydro', 'vertical', 'mycology', 'dome', 'lab', 'systems', 'cargo'];
+    const order = ['lounge', 'quarters', 'cupola', 'grow_a', 'hydro', 'vertical', 'mycology', 'dome', 'lab', 'systems', 'cargo'];
     for (const id of order) {
       const def = MOD_BY_ID[id];
       if (!def) continue;
