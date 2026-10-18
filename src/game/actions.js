@@ -114,15 +114,17 @@ export function harvest(st, slotId) {
   if (S.hasRes(st, 'seedbank') && Math.random() < 0.35) {
     seedBack = 1; st.seeds[s.plant] = (st.seeds[s.plant] || 0) + 1;
   }
+  const padBack = S.queuePadWash(st);
   Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0 });
   emit('harvest', { plant: p, value: v, levelUps: ups, seedBack });
-  return ok(`${p.name} geerntet`, { value: v, levelUps: ups, seedBack, plant: p });
+  return ok(`${p.name} geerntet`, { value: v, levelUps: ups, seedBack, padBack, plant: p });
 }
 
 export function clearSlot(st, slotId) {
   const s = slotById(st, slotId);
   if (!s?.plant) return no('Platz ist leer');
   const p = PLANT_BY_ID[s.plant];
+  S.queuePadWash(st);
   Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0 });
   return ok(`${p.name} entfernt und Platz gereinigt`);
 }

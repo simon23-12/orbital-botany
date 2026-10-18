@@ -22,6 +22,10 @@ export const RESEARCH = [
     effect: '+10 % Wachstum bei allen Blattkulturen.' },
 
   /* ── Wasser ── */
+  { id: 'padwash', name: 'Padaufbereitung', branch: 'Wasser', cost: 450, hours: 2, level: 1, req: [],
+    desc: 'Geerntete Substratpads werden gespült und wiederverwendet.',
+    fact: 'Gesinterter Ton und Steinwolle sind fast unverwüstlich. Gärtnereien spülen sie mit Wasser und dämpfen sie bei 80 °C — das tötet Keime und Pilzsporen, ohne die Porenstruktur anzugreifen.',
+    effect: 'Nach jeder Ernte kommt das Pad zurück: 10 min und 1 L Spülwasser je Pad, das Wasser läuft durch die Rückgewinnung.' },
   { id: 'recycle2', name: 'Kondensatorring', branch: 'Wasser', cost: 1600, hours: 4, level: 2, req: [],
     desc: 'Transpiriertes Wasser wird aus der Kabinenluft zurückgewonnen.',
     fact: 'Auf der ISS gewinnt das Wasseraufbereitungssystem rund 93 % zurück — aus Kondenswasser, Urin und Schweiß. „Yesterday’s coffee becomes today’s coffee", sagen die Besatzungen.',

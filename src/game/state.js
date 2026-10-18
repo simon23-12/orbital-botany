@@ -40,6 +40,7 @@ export function freshState(name = 'Kommandant') {
     water: 180,
     nutrients: 800,
     substrate: 12,
+    padWash: { queue: 0, nextAt: 0 },   // Pads in der Spülung
     battery: CONST.BATTERY_KWH * 0.85,
     co2Target: CONST.BASE_CO2,
     tempTarget: CONST.BASE_TEMP,
@@ -159,6 +160,17 @@ export function autoWater(st) {
   if (hasRes(st, 'autowater')) return 1;
   return 0;
 }
+/** Pad-Aufbereitung: je Pad 10 Minuten und 1 L Spülwasser. */
+export const PAD_WASH_MS = 10 * 60 * 1000;
+export const PAD_RINSE_L = 1;
+export function queuePadWash(st, now = Date.now()) {
+  if (!hasRes(st, 'padwash')) return false;
+  const w = st.padWash ||= { queue: 0, nextAt: 0 };
+  if (!w.queue) w.nextAt = now + PAD_WASH_MS;
+  w.queue++;
+  return true;
+}
+
 export const waterBuffer = st => hasRes(st, 'autowater') ? 1.6 : 1;
 
 /** Grundlast aller gebauten Module in Watt. */

@@ -408,13 +408,13 @@ function pickPlant(app, slot, UI) {
     return p.archetype !== 'fungus';
   });
   const noPad = st.substrate < 1;
-  let html = `<h2>Was soll auf diesen Platz?</h2><p>Tablett ${TRAY_AREA} m² in ${mod?.name}. Saatgut und ein Substratpad werden verbraucht.</p>`;
+  let html = `<h2>Was soll auf diesen Platz?</h2><p>Tablett ${TRAY_AREA} m² in ${mod?.name}. Saatgut und ein Substratpad werden verbraucht${S.hasRes(st, 'padwash') ? ', das Pad kommt nach der Ernte gespült zurück' : ''}.</p>`;
   if (noPad) {
     /* Ohne Pad ist jede Kultur gesperrt — das muss oben stehen, nicht unter der Liste. */
     const coming = st.orders.filter(o => !o.done && o.items.substrate);
     const eta = coming.length ? Math.min(...coming.map(o => o.arrivesAt)) - Date.now() : 0;
     html += `<div class="hint hint--amber" style="margin-top:1rem">${icon('alert')}<div><b>Keine Substratpads mehr.</b> Jede Kultur braucht ein Pad, deshalb ist gerade nichts wählbar.
-      ${coming.length ? `Nachschub dockt in ${dur(Math.max(0, eta), { short: true })} an.` : `<br><button class="btn btn--sm" data-shop style="margin-top:.5rem">${icon('box')}Substratpads bestellen</button>`}</div></div>`;
+      ${st.padWash?.queue ? `In der Spülung: ${st.padWash.queue}, das nächste ist in ${dur(Math.max(0, st.padWash.nextAt - Date.now()), { short: true })} fertig.` : coming.length ? `Nachschub dockt in ${dur(Math.max(0, eta), { short: true })} an.` : `<br><button class="btn btn--sm" data-shop style="margin-top:.5rem">${icon('box')}Substratpads bestellen</button>`}</div></div>`;
   }
   html += `<div class="pick" style="margin-top:1rem">`;
   for (const p of avail) {
@@ -427,7 +427,7 @@ function pickPlant(app, slot, UI) {
     </button>`;
   }
   html += `</div>`;
-  if (!noPad) html += `<p style="margin-top:1rem;font-size:.8rem;color:var(--ink-faint)">Substratpads vorrätig: <b>${st.substrate}</b></p>`;
+  if (!noPad) html += `<p style="margin-top:1rem;font-size:.8rem;color:var(--ink-faint)">Substratpads vorrätig: <b>${st.substrate}</b>${st.padWash?.queue ? ` · in der Spülung: ${st.padWash.queue}` : ''}</p>`;
   UI.modal(html, {
     onMount(root) {
       root.querySelector('[data-shop]')?.addEventListener('click', () => { UI.closeModal(); UI.open('shop', 'Verbrauch'); });
@@ -513,7 +513,7 @@ function slotDetail(app, s, UI) {
         let r;
         if (act === 'harvest') {
           r = A.harvest(st, s.id);
-          if (r.ok) { sfx.harvest(); UI.toast('ok', 'Geerntet', `${p.name} · +${num(r.value.credits)} Cr · +${num(r.value.xp)} EP${r.seedBack ? ' · 1 Samen zurückgewonnen' : ''}`); if (r.levelUps) UI.levelUp(r.levelUps); }
+          if (r.ok) { sfx.harvest(); UI.toast('ok', 'Geerntet', `${p.name} · +${num(r.value.credits)} Cr · +${num(r.value.xp)} EP${r.seedBack ? ' · 1 Samen zurückgewonnen' : ''}${r.padBack ? ' · Pad geht in die Spülung' : ''}`); if (r.levelUps) UI.levelUp(r.levelUps); }
         } else if (act === 'water') { r = A.waterSlot(st, s.id); if (r.ok) sfx.water(); }
         else if (act === 'pollen') { r = A.pollinate(st, s.id); if (r.ok) { sfx.research(); UI.toast('ok', 'Bestäubt', r.msg); } }
         else if (act === 'treat') { r = A.treat(st, s.id); if (r.ok) UI.toast('ok', 'Behandelt', r.msg); }
@@ -860,7 +860,8 @@ export function systems(app, arg, UI) {
   wc.append(kv('Tatsächlicher Verlust', `${num(st.stats.waterUsed - st.stats.waterRecovered, 0)} L`));
   wc.append(kv('Bewässerung', ['von Hand', 'Dochtbewässerung', 'Tropfautomatik'][S.autoWater(st)]));
   wc.append(kv('Nährsalze', `${grams(st.nutrients)} / ${grams(S.nutriCap(st))}`));
-  wc.append(kv('Substratpads', String(st.substrate)));
+  wc.append(kv('Substratpads', String(st.substrate) + (st.padWash?.queue ? ` (+${st.padWash.queue} in der Spülung, nächstes in ${dur(Math.max(0, st.padWash.nextAt - Date.now()), { short: true })})` : ''),
+    S.hasRes(st, 'padwash') ? '<b>Padaufbereitung</b>Geerntete Pads werden nacheinander gespült: 10 Minuten und 1 Liter je Pad. Das Spülwasser geht durch die Rückgewinnung.' : null));
   body.push(wc);
 
   body.push(secT('Atmosphäre & Klima'));

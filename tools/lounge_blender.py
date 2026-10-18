@@ -984,6 +984,166 @@ def build_q_mask():
     pr.add('plastic', case, H(0xe07a1e))
     return pr
 
+
+# ───────────────────────── Pilzkammer ─────────────────────────
+# Hängende Substratsäulen: Folienschlauch voll Stroh, vom Myzel durchwachsen,
+# aus eingeschnittenen Schlitzen brechen Austernseitlinge. Haken bei y = 0.
+
+def _oyster(pr, base, out, side, Lc, op, key, top_col):
+    """Muschelhut seitlich am Stiel: Oberseite und Lamellen als getrennte Flächen."""
+    up = Vector((0, 1, 0))
+    d = (out + up * .22).normalized()
+    z = (up - d * up.dot(d)).normalized()
+    x = d.cross(z).normalized()
+    # Fächer in Polarkoordinaten um den Stielansatz: breiter als lang,
+    # zum Stiel hin trichterförmig vertieft, Rand gewellt und leicht eingerollt.
+    nl, ns = 5, 10
+    top, bot = [], []
+    for i in range(nl + 1):
+        t = i / nl
+        rt, rb = [], []
+        for j in range(ns + 1):
+            th_ = (j / ns * 2 - 1) * 1.25
+            reach = Lc * (1 + .13 * math.sin(3 * th_ + key) + .06 * math.sin(7 * th_ + key * 2)) * (1 - .25 * (th_ / 1.25) ** 4)
+            rho = reach * t
+            zz = Lc * (.16 * math.sin(math.pi * t) ** .8 - .05 * (1 - sm(0, .3, t)))
+            zz -= Lc * (.16 * (1 - op) + .05) * sm(.72, 1, t) ** 2
+            zz += Lc * .035 * op * math.sin(th_ * 6 + key * 3) * sm(.7, 1, t)
+            th = Lc * (.1 * (1 - t) ** 1.4 + .02)
+            P = base + d * (rho * math.cos(th_) + Lc * .05) + x * (rho * math.sin(th_) * 1.05) + z * zz
+            rt.append(P); rb.append(P - z * th)
+        top.append(rt); bot.append(rb[::-1])
+    def tcol(p, n):
+        v = (p - base).length / max(Lc, 1e-4)
+        c = mix(top_col, H(0xb8ae9c), sm(.55, 1.05, v) * .55)
+        return c * (1 + .06 * nz(p, 160, key))
+    pr.add('clay', Block().quad_grid(top), tcol, ao=.6)
+    pr.add('clay', Block().quad_grid(bot), lambda p, n: mix(H(0xd8ceb8), H(0xf2ecdc), .5 + .5 * nz(p, 300, key)), ao=.9)
+
+def build_myco_column(seed='a', L=1.25, R=.105):
+    pr = Prop('myco_column_' + seed, ao=.85, ao_dist=.06)
+    import hashlib
+    # crc32 ist linear: Schlüssel, die sich nur im Saatbuchstaben unterscheiden,
+    # liefern fast dieselben Zahlen. Für die Varianten deshalb md5.
+    def rnd(key, a=0.0, b=1.0): return a + (b - a) * int(hashlib.md5(key.encode()).hexdigest()[:8], 16) / 4294967296.0
+    y0, y1 = -.2, -.2 - L                      # Hals oben, Knoten unten
+    sites = []
+    nsite = 6 + int(rnd(seed + 'ns', 0, 3))
+    for k in range(nsite):
+        a = k * TAU / nsite * 1.0 + rnd(seed + f'a{k}', -.5, .5) + k * 2.1
+        y = lerp(y1 + .2, y0 - .22, (k + rnd(seed + f'y{k}', .1, .9)) / nsite)
+        sites.append((a % TAU, y, rnd(seed + f'w{k}', .65, 1.0)))
+    def radius(y):
+        t = (y - y1) / (y0 - y1)               # 0 unten, 1 oben
+        r = R * sm(0, .07, t) ** .55 * (1 - .9 * sm(.86, 1, t) ** 1.4)
+        return max(r, .012) * (1 + .04 * (1 - t))   # unten etwas bauchiger: das Stroh sackt
+    def dent(a, y):
+        k = 0.0
+        for (sa, sy, w) in sites:
+            da = math.atan2(math.sin(a - sa), math.cos(a - sa))
+            k += math.exp(-(da / .22) ** 2 - ((y - sy) / .05) ** 2) * w
+        return k
+    rows = []
+    NR, NA = 64, 36
+    for i in range(NR + 1):
+        y = y1 + (y0 - y1) * i / NR
+        r0 = radius(y)
+        row = []
+        for j in range(NA):
+            a = j * TAU / NA
+            P = Vector((math.sin(a), 0, math.cos(a)))
+            b = nz(P * 2.2 + Vector((0, y * 6, 0)), 1, 2) * .6 + nz(P * 6 + Vector((0, y * 18, 0)), 1, 5) * .3 \
+                + nz(P * 16 + Vector((0, y * 50, 0)), 1, 8) * .08
+            t = (y - y1) / (y0 - y1)
+            fold = abs(math.sin(a * 7 + nz(P, 2, 3) * 2)) * sm(.75, .95, t) * .18   # Falten zum Hals hin
+            r = r0 * (1 + .11 * b - .06 * dent(a, y) - fold)
+            sway = .025 * math.sin(t * 2.6 + rnd(seed + 'sw', 0, 6)) * (1 - t)       # leicht krumm
+            row.append(Vector((P.x * r + sway, y, P.z * r + sway * .5)))
+        rows.append(row)
+    straw, straw2, white = H(0xb89a50), H(0x8a6a30), H(0xf0eee4)
+    def bag(p, n):
+        # Strohhalme: lang gezogenes Rauschen in wechselnden Richtungen
+        ang = nz(p, 9, 13) * 3
+        u = Vector((math.cos(ang), math.sin(ang) * .6, math.sin(ang)))
+        n1 = nz(p * 40 + u * (p.dot(u) * 300), 1, 1)
+        n2 = nz(Vector((p.x * 160, p.y * 25, p.z * 160)), 1, 4)
+        c = mix(straw, straw2, .5 + .5 * n1)
+        c = mix(c, H(0xd8c070), sm(.2, .7, n2) * .7)
+        cov = nz(p, 11, 9) * .6 + nz(p, 30, 2) * .3 + .08     # Myzeldecke mit Strohinseln
+        m = sm(-.12, .18, cov)
+        wisp = sm(.1, .6, nz(p, 90, 6))                      # watteartige Fäden auch über dem Stroh
+        c = mix(c, mix(white, H(0xe2dccc), .5 + .5 * n2), clamp(m * .95 + wisp * .25))
+        c = c * (.92 + .08 * sm(-1, 1, nz(p, 5, 7)))
+        a = math.atan2(p.x, p.z)
+        k = dent(a, p.y)
+        return mix(c, H(0x9a8a6a), sm(.4, .9, k) * .5)
+    pr.add('plastic', Block().quad_grid(rows, closed=True), bag)
+    # Knoten unten, abgedrehter Hals oben, Schnur zum Haken
+    pr.add('plastic', lathe([(1e-4, y1 - .06), (.014, y1 - .05), (.018, y1 - .02), (.012, y1 + .004)], 12, cap_bottom=True), H(0xd8d4c8), ao=.6)
+    tw = [Vector((math.sin(k * 1.3) * .004, y0 + k * .012, math.cos(k * 1.3) * .004)) for k in range(6)]
+    pr.add('plastic', tube(tw, [.016, .012, .011, .012, .01, .009], 10), H(0xdedad0), ao=.6)
+    pr.add('rubber', tube([Vector((0, y0 + .06, 0)), Vector((.004, -.08, 0)), Vector((0, -.012, 0))], .0035, 6), H(0x5a4a3a), ao=.4)
+    pr.add('metal', tube([Vector((0, -.015, 0)), Vector((0, .02, .012)), Vector((0, .045, 0)), Vector((0, .05, -.02))], .004, 6), H(0xa8acb0), ao=.4)
+    # Fruchtkörper
+    for si, (a, y, w) in enumerate(sites):
+        nrm = Vector((math.sin(a), 0, math.cos(a)))
+        side = Vector((0, 1, 0)).cross(nrm).normalized()
+        S = nrm * radius(y) * .98 + Vector((0, y, 0))
+        ncap = 9 + int(rnd(f'{seed}n{si}', 0, 7) * w)
+        op = rnd(f'{seed}op{si}', .55, 1.0)
+        for c in range(ncap):
+            # dachziegelartig: mehrere Etagen, die oberen kleiner
+            tier = c % 3
+            u = ((c * .618) % 1 - .5) * 2
+            lay = rnd(f'{seed}l{si}{c}')
+            out = (nrm * .95 + side * u * .8 + Vector((0, 1, 0)) * (.05 + .35 * lay + .12 * tier)).normalized()
+            base = S + side * u * .02 + Vector((0, (tier - 1) * .028 + (lay - .5) * .012, 0))
+            size = rnd(f'{seed}s{si}{c}', .6, 1.0) * w * (1 - .3 * abs(u)) * (1 - .18 * tier)
+            Lc = (.07 + .08 * op) * size + .015
+            tip = base + out * (.01 + .016 * size)
+            pr.add('clay', tube([base - out * .006, (base + tip) / 2, tip], [.011 * size + .003, .008 * size + .0025, .007 * size + .002], 7),
+                   H(0xeeeae0), ao=.6)
+            top = mix(mix(H(0x3e424c), H(0x6a645a), op), H(0x857b6c), rnd(f'{seed}tc{si}{c}') * .4)
+            _oyster(pr, tip - out * .002, out, side, Lc, op, rnd(f'{seed}k{si}{c}', 0, 6), top)
+    return pr
+
+def build_myco_fogger():
+    """Ultraschallvernebler auf dem Boden: Edelstahltank, Ripprohr nach oben,
+    Auslass zeigt in Richtung +Z."""
+    pr = Prop('myco_fogger', ao=.85, ao_dist=.12)
+    W, Hh, D = .5, .58, .42
+    pr.add('metal', softbox(W, Hh, D, .035, 3, (4, 4, 4)).xf(T(0, Hh / 2 + .04, 0)), H(0xb4b8bc))
+    pr.add('plastic', softbox(W + .01, .05, D + .01, .02, 2, (3, 1, 3)).xf(T(0, Hh + .06, 0)), H(0x2e3236))
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            pr.add('rubber', lathe([(1e-4, 0), (.025, 0), (.025, .04), (1e-4, .04)], 10, cap_bottom=True, cap_top=True).xf(T(sx * (W / 2 - .05), 0, sz * (D / 2 - .05))), H(0x1e1e20), ao=.5)
+    # Bedienfeld an der Front (+Z)
+    pr.add('plastic', softbox(.2, .12, .012, .006, 2, (2, 2, 1)).xf(T(.08, Hh - .08, D / 2 + .004)), H(0x1a1c20), ao=.5)
+    pr.add('glow', softbox(.06, .02, .004, .002, 1, (1, 1, 1)).xf(T(.04, Hh - .07, D / 2 + .011)), H(0x40ffb0), ao=0)
+    pr.add('glow', softbox(.012, .012, .004, .002, 1, (1, 1, 1)).xf(T(.14, Hh - .07, D / 2 + .011)), H(0x40c0ff), ao=0)
+    pr.add('metal', lathe([(.03, 0), (.03, .02), (.026, .024), (1e-4, .024)], 16, cap_top=True).xf(T(.13, Hh - .11, D / 2 + .01) @ RX(math.pi / 2)), H(0x8a8e92), ao=.5)
+    # Ripprohr: hoch und dann nach vorn
+    pts, rad = [], []
+    y0, top_y = Hh + .08, 1.62
+    for i in range(46):
+        t = i / 45
+        if t < .7:
+            u = t / .7
+            P = Vector((-.08, y0 + (top_y - .18 - y0) * u, -.04))
+        else:
+            u = (t - .7) / .3
+            ang = u * math.pi / 2
+            P = Vector((-.08, top_y - .18 + .18 * math.sin(ang), -.04 + .18 * (1 - math.cos(ang)) + .12 * u))
+        pts.append(P); rad.append(.05 if i % 2 else .056)
+    pr.add('plastic', tube(pts, rad, 14, caps=False), H(0xd4d8d6))
+    end = pts[-1]; d = (pts[-1] - pts[-2]).normalized()
+    q = d.to_track_quat('Y', 'Z').to_matrix().to_4x4()
+    pr.add('plastic', lathe([(.054, -.01), (.06, .0), (.06, .05), (.07, .09), (.066, .095), (.055, .06), (.047, .0)], 20).xf(Matrix.Translation(end) @ q), H(0xc8ccca))
+    pr.add('rubber', lathe([(.058, -.02), (.062, -.02), (.062, .02), (.058, .02)], 20).xf(Matrix.Translation(pts[0] + Vector((0, .01, 0)))), H(0x2a2c2e), ao=.5)
+    # Halteschelle an der Wand hinter dem Rohr
+    pr.add('metal', softbox(.03, .03, .1, .006, 1, (1, 1, 2)).xf(T(-.08, 1.15, -.12)), H(0x9a9ea2), ao=.5)
+    return pr
+
 # ───────────────────────── Feuerlöscher ─────────────────────────
 # Rückseite bei z = 0 (Wand), steht entlang +Y, Flasche mittig bei y = 0.
 
@@ -1463,7 +1623,9 @@ BUILDERS = {'couch': build_couch, 'shelf': build_shelf, 'extinguisher': build_ex
             'cat': build_cat, 'blanket': build_blanket, 'labbench': build_labbench,
             'labbench_short': lambda: build_labbench(4.12, 'lbs'),
             'cq_booth': build_cq_booth, 'cq_booth_closed': lambda: build_cq_booth(True),
-            'q_fan': build_q_fan, 'q_lamp': build_q_lamp, 'q_photos': build_q_photos, 'q_reader': build_q_reader, 'q_mask': build_q_mask}
+            'q_fan': build_q_fan, 'q_lamp': build_q_lamp, 'q_photos': build_q_photos, 'q_reader': build_q_reader, 'q_mask': build_q_mask,
+            'myco_column_a': lambda: build_myco_column('a'), 'myco_column_b': lambda: build_myco_column('b', 1.34, .11),
+            'myco_fogger': build_myco_fogger}
 
 def export(ids=None):
     out = os.path.join(ROOT, 'assets', 'props')

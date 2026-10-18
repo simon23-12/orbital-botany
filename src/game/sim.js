@@ -293,6 +293,20 @@ function processTimed(st, t, log) {
     }
   }
 
+  /* Padaufbereitung — ein Pad nach dem anderen. Das Spülwasser läuft
+   * durch denselben Kondensator wie das transpirierte Wasser. */
+  const w = st.padWash;
+  while (w?.queue > 0 && w.nextAt <= t) {
+    if (st.water < S.PAD_RINSE_L) { w.nextAt = t + S.PAD_WASH_MS; break; }   // wartet auf Wasser
+    const back = S.PAD_RINSE_L * S.recovery(st);
+    st.water = Math.min(S.waterCap(st), st.water - S.PAD_RINSE_L + back);
+    st.stats.waterUsed += S.PAD_RINSE_L;
+    st.stats.waterRecovered += back;
+    st.substrate++;
+    w.queue--;
+    w.nextAt = w.queue ? w.nextAt + S.PAD_WASH_MS : 0;
+  }
+
   /* Forschung */
   const r = st.research.active;
   if (r && r.endsAt <= t) {

@@ -294,7 +294,8 @@ function shell(len, rad, M, opts = {}) {
   const capTex = panelTexture().clone(); capTex.needsUpdate = true; capTex.repeat.set(.45, .45);
   const capMat = new THREE.MeshStandardMaterial({ map: capTex, color: 0xeceae4, roughness: .72, metalness: .1, side: THREE.DoubleSide });
   // gebackene Paneele: Durchstiegswände haben UVs in Metern, geschlossene Kreise 0…1 über den Durchmesser
-  const portMat = panelMaterial(1) || capMat, capMatB = panelMaterial(1 / (2 * rad)) || capMat;
+  const tint = m => { if (opts.endTint == null) return m; const c = m.clone(); c.color = new THREE.Color(opts.endTint); return c; };
+  const portMat = tint(panelMaterial(1) || capMat), capMatB = tint(panelMaterial(1 / (2 * rad)) || capMat);
   for (const [key, sgn] of [['neg', -1], ['pos', 1]]) {
     const kind = ends[key];
     if (kind === 'open') continue;
@@ -336,6 +337,32 @@ const sphR = (c, r) => ({ type: 'sph', c, r });
 const BIG = 50;
 
 /* ───────────────────────── Die Räume ───────────────────────── */
+
+/** Weiche Nebelflocke: radialer Verlauf, von Rauschen zerfranst. */
+let _mist = null;
+function mistTexture() {
+  if (_mist) return _mist;
+  const S = 128, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const x = c.getContext('2d');
+  const img = x.createImageData(S, S);
+  const r = rng(5);
+  const blobs = Array.from({ length: 14 }, () => [r() * .6 + .2, r() * .6 + .2, .12 + r() * .2, .4 + r() * .6]);
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const u = i / S, v = j / S;
+    const d = Math.hypot(u - .5, v - .5) * 2;
+    let a = 0;
+    for (const [bx, by, br, bw] of blobs) a += bw * Math.max(0, 1 - Math.hypot(u - bx, v - by) / br) ** 2;
+    a = Math.min(1, a * .55) * Math.max(0, 1 - d) ** 1.6;
+    const k = (j * S + i) * 4;
+    img.data[k] = img.data[k + 1] = img.data[k + 2] = 255;
+    img.data[k + 3] = Math.round(a * 255);
+  }
+  x.putImageData(img, 0, 0);
+  _mist = new THREE.CanvasTexture(c);
+  _mist.colorSpace = THREE.SRGBColorSpace;
+  return _mist;
+}
 
 const ROOMS = {
 
@@ -820,6 +847,7 @@ const ROOMS = {
 
     if (def.sunlit) return ROOMS.dome(st, ctx, modId, g, slots);
     if (modId === 'vertical') return ROOMS.tower(st, ctx, modId, g, slots, ports);
+    if (def.dark) return ROOMS.mycology(st, ctx, modId, ports);
 
     const dark = !!def.dark;
     const LEN = clamp(4.5 + n * 0.5, 5, 11), RAD = 2.4;
@@ -886,6 +914,239 @@ const ROOMS = {
     g.add(aisle2);
 
     ctx.camera = { pos: new THREE.Vector3(-LEN * .42, .3, .02), look: new THREE.Vector3(LEN * .5, -.7, 0) };
+    return g;
+  },
+
+  /* ══ PILZKAMMER ══
+     Dunkel, kühl, 95 % Luftfeuchte. Vorn zwei Fruchtzelte aus Folie mit den
+     Tabletts, hinten hängen Substratsäulen an Deckenschienen, aus denen die
+     Austernseitlinge brechen. Ein Ultraschallvernebler hält den Nebel am Boden. */
+  mycology(st, ctx, modId, ports = {}) {
+    const M = mats();
+    const g = new THREE.Group();
+    const slots = st.slots.filter(s => s.mod === modId);
+    const n = slots.length;
+    const LEN = 7.6, RAD = 2.4;
+    g.add(shell(LEN, RAD, M, { color: 0x56625f, endTint: 0x6a7472, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ends'], seed: 83,
+      neg: { to: ports.nearName }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.82], [BIG, BIG, .82])]];
+    const floorTop = -RAD * .72 + .04;
+    const tickers = ctx.tickers = [];
+
+    /* Nasser Boden: eine glänzende, fast schwarze Haut über dem Riffelblech */
+    const wet = new THREE.Mesh(new THREE.PlaneGeometry(LEN - .1, RAD * 1.36),
+      new THREE.MeshStandardMaterial({ color: 0x0b1416, roughness: .12, metalness: .2, transparent: true, opacity: .45, depthWrite: false }));
+    wet.rotation.x = -Math.PI / 2;
+    wet.position.y = floorTop + .004;
+    g.add(wet);
+
+    /* ── Fruchtzelte mit den Tabletts ── */
+    const X0 = -1.15, TW = 2.25, TH = 2.02, Z0 = .86, Z1 = 1.8;
+    const LV = [floorTop + .42, floorTop + 1.2];
+    const steel = new THREE.MeshStandardMaterial({ color: 0xb8c0c4, roughness: .28, metalness: .9 });
+    const foil = new THREE.MeshStandardMaterial({ color: 0xd8ecec, roughness: .25, metalness: 0, transparent: true, opacity: .2,
+      depthWrite: false, side: THREE.DoubleSide });
+    const strip = new THREE.MeshStandardMaterial({ color: 0xcfe6ea, roughness: .15, metalness: 0, transparent: true, opacity: .17,
+      depthWrite: false, side: THREE.DoubleSide });
+    const rod = (a, b, r = .018) => {
+      const d = new THREE.Vector3().subVectors(b, a);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 8), steel);
+      m.position.copy(a).addScaledVector(d, .5);
+      m.quaternion.setFromUnitVectors(UP, d.normalize());
+      g.add(m);
+      return m;
+    };
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const strips = [];
+    const hangStrip = (x, z, w, h, rotY, phase) => {
+      const geo = new THREE.PlaneGeometry(w, h);
+      geo.translate(0, -h / 2, 0);                  // Drehpunkt an der Oberkante
+      const m = new THREE.Mesh(geo, strip);
+      m.position.set(x, floorTop + TH - .02, z);
+      m.rotation.y = rotY;
+      g.add(m);
+      strips.push({ m, phase, base: m.rotation.x });
+    };
+    for (const side of [-1, 1]) {
+      const za = side * Z0, zb = side * Z1;
+      const xa = X0 - TW / 2, xb = X0 + TW / 2, yt = floorTop + TH;
+      // Gestell: vier Pfosten, Rahmen oben, Regalböden auf zwei Ebenen
+      for (const x of [xa, xb]) for (const z of [za, zb]) rod(V(x, floorTop, z), V(x, yt, z));
+      for (const z of [za, zb]) rod(V(xa, yt, z), V(xb, yt, z));
+      for (const x of [xa, xb]) rod(V(x, yt, za), V(x, yt, zb));
+      for (const y of LV) {
+        const shelf = new THREE.Mesh(new THREE.BoxGeometry(TW - .04, .03, Math.abs(zb - za) - .04), steel);
+        shelf.position.set(X0, y - .055, (za + zb) / 2);
+        g.add(shelf);
+        // Drahtgitter-Optik: Querstreben
+        for (let k = -4; k <= 4; k++) rod(V(X0 + k * TW / 9, y - .035, za), V(X0 + k * TW / 9, y - .035, zb), .006);
+      }
+      // Folie hinten und oben
+      const top = new THREE.Mesh(new THREE.PlaneGeometry(TW, Math.abs(zb - za)), foil);
+      top.rotation.x = -Math.PI / 2; top.position.set(X0, yt + .01, (za + zb) / 2);
+      g.add(top);
+      // Lamellenvorhang an beiden Stirnseiten, vorn zur Seite gerafft
+      for (const [x, sgn] of [[xa, -1], [xb, 1]]) {
+        for (let k = 0; k < 5; k++) hangStrip(x + sgn * .004 * k, za + (zb - za) * (k + .5) / 5, .22, TH - .06, Math.PI / 2, k * 1.3 + side + sgn);
+        for (let k = 0; k < 3; k++) hangStrip(x - sgn * (.06 + k * .05), za - side * .01 * k, .2, TH - .06, .25 * sgn * side + k * .08, k * .9 + 4);
+      }
+      // Fruchtlicht: kaltweiße Leisten unter dem oberen Boden und unter dem Dach
+      for (const y of [LV[1] - .09, yt - .05]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(TW - .2, .025, .05),
+          new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xcfeeff, emissiveIntensity: 2.2, roughness: .3 }));
+        bar.position.set(X0, y, (za + zb) / 2 - side * .18);
+        g.add(bar);
+      }
+      const pl = new THREE.PointLight(0xc6e8ff, 1.1, 3.4, 2);
+      pl.position.set(X0, LV[1] + .3, side * 1.2);
+      g.add(pl);
+    }
+    // Tabletts: je Seite zwei Spalten auf zwei Ebenen
+    ctx.anchors = [];
+    const spots = [];
+    for (let i = 0; i < Math.max(n, 8); i++) {
+      const side = i % 2 ? 1 : -1, k = Math.floor(i / 2);
+      spots.push({ side, x: X0 + ((k % 2) - .5) * 1.0, y: LV[Math.floor(k / 2) % 2] });
+    }
+    for (let i = 0; i < n; i++) {
+      const { side, x, y } = spots[i];
+      const t = tray(.62, false);
+      t.position.set(x, y, side * 1.3);
+      t.rotation.y = side < 0 ? 0 : Math.PI;
+      t.traverse(o => { if (o.isMesh) { o.userData.slotId = slots[i].id; o.userData.pickable = true; } });
+      g.add(t);
+      ctx.anchors.push({ slot: slots[i], obj: t.userData.anchor, tray: t });
+    }
+    // Freie Plätze: frisch beimpfte Blöcke, noch ganz im Dunkeln
+    const blockMat = new THREE.MeshStandardMaterial({ color: 0xa8a090, roughness: .6 });
+    for (let i = n; i < spots.length; i++) {
+      const { side, x, y } = spots[i];
+      for (let b = 0; b < 3; b++) {
+        const blk = new THREE.Mesh(new THREE.BoxGeometry(.17, .24, .17), blockMat);
+        blk.position.set(x + (b - 1) * .2, y + .1, side * (1.3 + (b % 2) * .08));
+        blk.rotation.y = b * .3;
+        g.add(blk);
+      }
+    }
+    tickers.push((t) => {
+      for (const s of strips) s.m.rotation.x = s.base + Math.sin(t * .55 + s.phase) * .025 + Math.sin(t * 1.3 + s.phase * 2) * .008;
+    });
+
+    /* ── Säulengarten: Substratschläuche an Deckenschienen ── */
+    const rows = [
+      { z: -.66, y: 1.98, xs: [1.05, 1.85, 2.65, 3.35] },
+      { z: .66, y: 1.98, xs: [1.4, 2.2, 3.0] },
+      { z: -1.42, y: 1.66, xs: [1.45, 2.3] },
+      { z: 1.42, y: 1.66, xs: [1.0, 1.8, 2.6, 3.3] },
+    ];
+    let ci = 0;
+    for (const r of rows) {
+      rod(V(.75, r.y, r.z), V(3.55, r.y, r.z), .016);
+      for (const bx of [.85, 2.2, 3.45]) {
+        const top = Math.sqrt(RAD * RAD - r.z * r.z) - .05;
+        rod(V(bx, r.y, r.z), V(bx, top, r.z * (top / Math.hypot(top, r.z)) * 1.0), .012);
+      }
+      for (const x of r.xs) {
+        const id = ci % 3 === 1 ? 'myco_column_b' : 'myco_column_a';
+        const drop = .4 + (ci * .37 % 1) * .35;           // unterschiedlich lange Schnüre
+        const col = hasProp(id) ? makeProp(id) : null;
+        if (col) {
+          col.position.set(x, r.y - drop, r.z);
+          col.rotation.y = ci * 2.39;
+          g.add(col);
+        } else {
+          const c = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, 1.2, 14), blockMat);
+          c.position.set(x, r.y - drop - .8, r.z);
+          g.add(c);
+        }
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(.004, .004, drop, 4), M.hullDark);
+        cord.position.set(x, r.y - drop / 2 + .02, r.z);
+        g.add(cord);
+        ci++;
+      }
+    }
+    for (const z of [-1.0, 1.0]) {
+      const pl = new THREE.PointLight(0xb8dcff, .9, 3.6, 2);
+      pl.position.set(2.2, 1.55, z);
+      g.add(pl);
+    }
+    for (const z of [-.66, .66]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(2.6, .02, .04),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xbfe2ff, emissiveIntensity: 1.6, roughness: .3 }));
+      bar.position.set(2.15, 2.12, z * 1.55);
+      g.add(bar);
+    }
+
+    /* Orientierungsleuchten am Gangrand, bernsteinfarben wie in einer Dunkelkammer */
+    const amber = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, .7, .2) });
+    for (const z of [-.86, .86]) for (let x = -3.3; x < 3.5; x += .55) {
+      const d = new THREE.Mesh(new THREE.BoxGeometry(.16, .012, .02), amber);
+      d.position.set(x, floorTop + .01, z);
+      g.add(d);
+    }
+    const amberL = new THREE.PointLight(0xffa050, .35, 2.4, 2);
+    amberL.position.set(-.3, floorTop + .3, 0);
+    g.add(amberL);
+
+    /* ── Vernebler und Nebel ── */
+    const FX = 3.32, FZ = -1.12;
+    const fog = hasProp('myco_fogger') ? makeProp('myco_fogger') : null;
+    if (fog) { fog.position.set(FX, floorTop, FZ); fog.rotation.y = -Math.PI / 2; g.add(fog); }
+    const outlet = new THREE.Vector3(FX - .44, floorTop + 1.62, FZ - .08);
+    const puff = mistTexture();
+    const mist = [];
+    const R = rng(97);
+    for (let i = 0; i < 18; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: puff, color: 0x9fb6ba, transparent: true, opacity: 0, depthWrite: false }));
+      const o = { sp, kind: 'ground', x: -3.4 + R() * 6.8, y: floorTop + .12 + R() * .35, z: (R() - .5) * 2.6, s: 1.6 + R() * 1.4,
+        a: .2 + R() * .12, v: .05 + R() * .05, ph: R() * TAU, rot: R() * TAU };
+      sp.material.rotation = o.rot;
+      mist.push(o); g.add(sp);
+    }
+    for (let i = 0; i < 12; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: puff, color: 0xb4c8cc, transparent: true, opacity: 0, depthWrite: false }));
+      mist.push({ sp, kind: 'plume', life: i / 12 * 7, ph: R() * TAU, rot: R() * TAU });
+      g.add(sp);
+    }
+    tickers.push((t, dt) => {
+      for (const o of mist) {
+        if (o.kind === 'ground') {
+          o.x -= o.v * dt;
+          if (o.x < -3.6) o.x += 7.0;
+          const edge = clamp01((o.x + 3.6) / .8) * clamp01((3.5 - o.x) / .8);
+          o.sp.position.set(o.x, o.y + Math.sin(t * .3 + o.ph) * .05, o.z + Math.sin(t * .17 + o.ph) * .15);
+          o.sp.scale.set(o.s * 1.6, o.s * .55, 1);
+          o.sp.material.opacity = o.a * edge;
+          o.sp.material.rotation = o.rot + Math.sin(t * .1 + o.ph) * .2;
+        } else {
+          // Ultraschallnebel ist schwerer als Luft: er quillt aus dem Rohr und sinkt ab
+          o.life = (o.life + dt) % 7;
+          const u = o.life / 7;
+          const reach = 1 - Math.pow(1 - u, 2.2);
+          o.sp.position.set(outlet.x - reach * 1.9, outlet.y - u * u * 1.5 + Math.sin(o.ph + t) * .03, outlet.z + Math.sin(o.ph * 3) * .25 * u);
+          const sc = .25 + u * 1.5;
+          o.sp.scale.set(sc * 1.3, sc, 1);
+          o.sp.material.opacity = .3 * Math.min(1, u * 6) * (1 - u) ** 1.3;
+          o.sp.material.rotation = o.rot + u * .8;
+        }
+      }
+    });
+
+    /* Bedienfeld: Klima der Kammer */
+    const con = screen(.72, .42, .45);
+    con.position.set(-LEN / 2 + .6, -.3, -1.2);
+    con.rotation.y = Math.PI / 2 - .55;
+    const draw = con.userData.draw;
+    con.userData.draw = t => draw(t, ['rH   94 %', 'T    16.5 °C', 'CO₂  780 ppm', 'Licht 180 lx']);
+    g.add(con);
+    ctx.screens = [con];
+
+    g.add(new THREE.HemisphereLight(0x4a6670, 0x161b1a, .4));
+    g.add(new THREE.AmbientLight(0x34403f, .22));
+    ctx.profile = { keepTint: true, envI: .1 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .42, -.05, .02), look: new THREE.Vector3(LEN * .5, -.15, 0) };
     return g;
   },
 
@@ -1628,7 +1889,7 @@ export class Interior {
 
   _clearBuild() {
     this.anchors = []; this.screens = []; this.regions = []; this.sources = []; this.tunnels = [];
-    this.spawns = {}; this.profiles = { node: NODE_PROFILE }; this.spinners = []; this.dynamic = []; this.floaters = [];
+    this.spawns = {}; this.profiles = { node: NODE_PROFILE }; this.spinners = []; this.dynamic = []; this.floaters = []; this.tickers = [];
     for (const l of this.pool || []) { l.userData.src = null; l.userData.fade = 0; l.intensity = 0; }
   }
 
@@ -1747,6 +2008,7 @@ export class Interior {
     }
     for (const s of ctx.screens || []) this.screens.push({ mesh: s, pos: s.getWorldPosition(new THREE.Vector3()) });
     if (ctx.record) this.spinners.push(ctx.record);
+    for (const f of ctx.tickers || []) this.tickers.push(f);
     for (const f of ctx.floaters || []) this.floaters.push({ obj: f, base: f.position.clone(), q: f.quaternion.clone(), seed: this.floaters.length * 1.7 });
     if (ctx.winFill) this.dynamic.push({ light: ctx.winFill, kind: 'window' });
     if (ctx.camera) {
@@ -1776,8 +2038,10 @@ export class Interior {
     /* Die Räume waren auf eine Sonne ohne Schatten abgestimmt, die überall
        warm hineinschien. Ohne sie kippt das Grundlicht ins Blaue — also
        neutraler mischen. */
-    profile.hemiSky.lerp(WARM_WHITE, .5);
-    profile.ambColor.lerp(WARM_GREY, .45);
+    if (!profile.keepTint) {
+      profile.hemiSky.lerp(WARM_WHITE, .5);
+      profile.ambColor.lerp(WARM_GREY, .45);
+    }
     if (id !== 'node' || !this.profiles.node.custom) this.profiles[id] = profile;
   }
 
@@ -1994,6 +2258,7 @@ export class Interior {
     this.hemi.intensity += (pr.hemiI - this.hemi.intensity) * a;
     this.amb.color.lerp(pr.ambColor, a);
     this.amb.intensity += (pr.ambI - this.amb.intensity) * a;
+    if (this.scene.environment) this.scene.environmentIntensity += ((pr.envI ?? .38) - this.scene.environmentIntensity) * a;
     this._fov += ((pr.fov || 70) - this._fov) * (1 - Math.exp(-2 * dt));
     if (Math.abs(cam.fov - this._fov) > .01) { cam.fov = this._fov; cam.updateProjectionMatrix(); }
 
@@ -2035,6 +2300,7 @@ export class Interior {
       for (const s of this.screens) if (s.pos.distanceToSquared(this.pos) < 110) s.mesh.userData.draw?.(t, []);
     }
     for (const r of this.spinners) r.rotation.y = t * 3.3;
+    for (const f of this.tickers) f(t, Math.min(dt, .1));
     /* Was nicht festgemacht ist, treibt langsam an seiner Leine */
     for (const f of this.floaters) {
       f.obj.position.copy(f.base).add(_g.set(Math.sin(t * .23 + f.seed) * .03, Math.sin(t * .17 + f.seed * 2) * .04, Math.cos(t * .19 + f.seed) * .03));
