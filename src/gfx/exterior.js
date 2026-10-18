@@ -3,7 +3,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildStation, LAYOUT, PITCH } from './station.js';
+import { buildStation, modulePos, PITCH } from './station.js';
 import { MOD_BY_ID } from '../data/modules.js';
 import { clamp, TAU } from '../core/util.js';
 
@@ -89,6 +89,7 @@ export class Exterior {
       this.stationGroup.remove(this.station.group);
       this.station.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
     }
+    this.st = st;
     this.station = buildStation(st);
     this.stationGroup.add(this.station.group);
     this.pickables = this.station.pickables;
@@ -167,9 +168,9 @@ export class Exterior {
   }
 
   focusModule(id) {
-    const cfg = LAYOUT[id];
-    if (!cfg || !this.controls) return;
-    const p = new THREE.Vector3().fromArray(cfg.pos);
+    const pos = this.st ? modulePos(this.st, id) : null;
+    if (!pos || !this.controls) return;
+    const p = new THREE.Vector3().fromArray(pos);
     this.controls.target.lerp(p, 0.6);
   }
 }

@@ -30,6 +30,27 @@ export const LAYOUT = {
   dome:     { pos: [0, 4.6, 0], len: 3.0, rad: 2.6, axis: 'y', color: 0xdfe8ee, dome: true },
 };
 
+/* An −Z hängen die Module in der Reihenfolge, in der sie gebaut wurden —
+ * ohne Lücke für noch nicht gebaute. Gleiche Reihenfolge wie innen. */
+const CHAIN_NZ = ['quarters', 'hydro', 'mycology'];
+const CHAIN_START = -2.7, CHAIN_GAP = .45;
+
+/** Wo ein Modul bei diesem Ausbaustand tatsächlich sitzt. */
+export function modulePos(st, id) {
+  const cfg = LAYOUT[id];
+  if (!cfg) return null;
+  if (!CHAIN_NZ.includes(id)) return cfg.pos;
+  let cursor = CHAIN_START;
+  const order = CHAIN_NZ.filter(k => st.modules[k]?.built || st.modules[k]?.building)
+    .sort((a, b) => (st.modules[a].readyAt || 0) - (st.modules[b].readyAt || 0));
+  for (const k of order) {
+    const c = LAYOUT[k];
+    if (k === id) return [c.pos[0], c.pos[1], cursor - c.len / 2];
+    cursor -= c.len + CHAIN_GAP;
+  }
+  return cfg.pos;
+}
+
 function cylinderFor(len, rad, axis) {
   const g = new THREE.CylinderGeometry(rad, rad, len, 28, 1, false);
   if (axis === 'x') g.rotateZ(Math.PI / 2);
@@ -68,23 +89,10 @@ function handrails(len, rad, axis, M) {
 }
 
 /** Ein Modul als Gruppe. */
-function buildModule(id, cfg, M, built) {
+function buildModule(id, cfg, M) {
   const g = new THREE.Group();
   g.name = 'mod:' + id;
   g.userData.moduleId = id;
-
-  if (!built) {
-    const wire = new THREE.Mesh(
-      cfg.dome ? new THREE.SphereGeometry(cfg.rad, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2)
-               : cylinderFor(cfg.len, cfg.rad, cfg.axis),
-      new THREE.MeshBasicMaterial({ color: 0x4fd6ff, wireframe: true, transparent: true, opacity: 0.16 })
-    );
-    wire.userData.pickable = true; wire.userData.moduleId = id;
-    g.add(wire);
-    g.position.fromArray(cfg.pos);
-    g.userData.ghost = true;
-    return g;
-  }
 
   if (cfg.cupola) {
     // Sechseckiger Kegelstumpf zur Erdseite, mit Fensterläden
@@ -304,9 +312,9 @@ export function buildStation(st) {
   for (const [id, cfg] of Object.entries(LAYOUT)) {
     const built = !!st.modules[id]?.built;
     const building = !!st.modules[id]?.building;
-    const def = MOD_BY_ID[id];
-    if (!built && !building && def && st.level < def.level - 2) continue;   // noch zu weit weg
-    const g = buildModule(id, cfg, M, built);
+    // Nur, was gebaut ist oder gerade montiert wird — keine Vorschau künftiger Module
+    if (!built && !building) continue;
+    const g = buildModule(id, { ...cfg, pos: modulePos(st, id) }, M);
     if (building) {
       g.traverse(o => { if (o.material && !o.material.wireframe) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = .45; } });
     }

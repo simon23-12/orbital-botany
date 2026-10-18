@@ -1228,7 +1228,7 @@ const ROOMS = {
     const ledUp = tiers === 3 ? .5 : .56;
     const SLOPE = .012;                                  // 1,2 % Gefälle zum Rücklauf
     const potGeo = new THREE.CylinderGeometry(.026, .02, .03, 10, 1, true);
-    const pots = [], sprouts = [];
+    const pots = [];
     const streams = [];
     const streamTex = waterStreamTexture();
     for (const side of [-1, 1]) {
@@ -1280,7 +1280,7 @@ const ROOMS = {
       pipe(V(XB + .14, floorTop + .1, side * (ZC + .18)), V(LEN / 2 - .9, floorTop + .1, side * (ZC + .05)), .035, white);
       pipe(V(XA - .12, floorTop + .06, side * (ZC + .2)), V(LEN / 2 - .9, floorTop + .06, side * (ZC + .25)), .03, blue);
     }
-    // Netztöpfe als ein Netz, dazu Jungpflanzen in den freien Löchern
+    // Netztöpfe als ein Netz
     const potsIM = new THREE.InstancedMesh(potGeo, black, pots.length);
     const m4 = new THREE.Matrix4();
     pots.forEach((q, i) => { q.tier.updateMatrixWorld(true); m4.makeTranslation(q.p.x, q.p.y, q.p.z).premultiply(q.tier.matrixWorld); potsIM.setMatrixAt(i, m4); });
@@ -1293,7 +1293,6 @@ const ROOMS = {
     ctx.anchors = [];
     const perSide = Math.ceil(n / 2);
     const perTier = Math.max(1, Math.ceil(perSide / tiers));
-    const used = [];
     for (let i = 0; i < n; i++) {
       const side = i % 2 ? 1 : -1, k = Math.floor(i / 2);
       const tierI = Math.floor(k / perTier), col = k % perTier;
@@ -1318,37 +1317,13 @@ const ROOMS = {
       t.traverse(o => { if (o.isMesh) { o.userData.slotId = slots[i].id; o.userData.pickable = true; } });
       g.add(t);
       ctx.anchors.push({ slot: slots[i], obj: t.userData.anchor, tray: t });
-      used.push({ side, tierI, x0: x - .36, x1: x + .36 });
     }
-    // Jungpflanzen in den Löchern außerhalb der Plätze
-    // Keimling: kurzer Stiel und zwei bis drei Keimblätter, schräg nach oben
-    const sproutGeo = mergeGeometries([0, 1, 2].map(i => {
-      const leaf = new THREE.SphereGeometry(1, 8, 4);
-      leaf.scale(.024, .004, .012);
-      leaf.translate(.022, 0, 0);
-      leaf.rotateZ(.45);
-      leaf.rotateY(i * TAU / 3);
-      leaf.translate(0, .045, 0);
-      return leaf.toNonIndexed();
-    }).concat([new THREE.CylinderGeometry(.003, .004, .045, 4).translate(0, .022, 0).toNonIndexed()]));
-    const sproutMat = new THREE.MeshStandardMaterial({ color: 0x7cc456, roughness: .55, side: THREE.DoubleSide });
-    const R = rng(23);
-    const free = pots.filter(q => {
-      const wp = q.tier.localToWorld(q.p.clone());
-      return !used.some(u => Math.sign(wp.z) === u.side && Math.abs(q.tier.position.y - tierY[u.tierI]) < .01 && wp.x > u.x0 && wp.x < u.x1) && R() < .55;
-    });
-    const sp = new THREE.InstancedMesh(sproutGeo, sproutMat, free.length);
-    free.forEach((q, i) => {
-      const wp = q.tier.localToWorld(q.p.clone()).applyMatrix4(gInv);
-      m4.compose(wp, new THREE.Quaternion().setFromEuler(new THREE.Euler((R() - .5) * .4, R() * 6, (R() - .5) * .4)), new THREE.Vector3().setScalar(.7 + R() * .8));
-      sp.setMatrixAt(i, m4);
-    });
-    g.add(sp);
 
     /* Vorratstanks: Acryl mit Nährlösung, von unten beleuchtet, Blasen vom Sprudelstein */
     const acryl = new THREE.MeshStandardMaterial({ color: 0xdfefff, roughness: .05, metalness: 0, transparent: true, opacity: .16, depthWrite: false, side: THREE.DoubleSide });
     const sol = new THREE.MeshStandardMaterial({ color: 0x2a9be0, emissive: 0x0a5aa0, emissiveIntensity: .9, roughness: .1, transparent: true, opacity: .55, depthWrite: false });
     const bubTex = bubbleTexture();
+    const R = rng(23);
     const bubbles = [];
     for (const side of [-1, 1]) {
       const x = LEN / 2 - .62, z = side * 1.12, base = floorTop;
@@ -2171,7 +2146,8 @@ export class Interior {
     const nodePorts = new Set();
 
     for (const ch of CHAINS) {
-      const ids = ch.ids.filter(built);
+      // in Bauzeitfolge: was zuerst fertig war, sitzt am Knoten
+      const ids = ch.ids.filter(built).sort((a, b) => (st.modules[a].readyAt || 0) - (st.modules[b].readyAt || 0));
       if (!ids.length) continue;
       nodePorts.add(ch.key);
       let cursor = NODE_H + GAP;
@@ -2197,7 +2173,7 @@ export class Interior {
     }
 
     const nodeNames = {};
-    for (const ch of CHAINS) { const first = ch.ids.find(built); if (first) nodeNames[ch.key] = MOD_BY_ID[first]?.short; }
+    for (const ch of CHAINS) { const first = ch.ids.filter(built).sort((a, b) => (st.modules[a].readyAt || 0) - (st.modules[b].readyAt || 0))[0]; if (first) nodeNames[ch.key] = MOD_BY_ID[first]?.short; }
     const node = buildNode(nodePorts, M, nodeNames);
     node.name = 'room:node';
     this.root.add(node);
