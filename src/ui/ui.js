@@ -1,5 +1,5 @@
 /*  Oberfläche: HUD, Raumnavigation, Panels, Meldungen. */
-import { el, $, $$, clear, num, compact, vol, watt, grams, dur, clockStr, dateStr, missionDay, clamp, clamp01, HOUR, MIN } from '../core/util.js';
+import { el, $, $$, clear, num, compact, vol, watt, grams, dur, countdown, clockStr, dateStr, missionDay, clamp, clamp01, HOUR, MIN } from '../core/util.js';
 import { icon } from './icons.js';
 import * as S from '../game/state.js';
 import * as SIM from '../game/sim.js';
@@ -191,6 +191,8 @@ export const UI = {
     const st = this.app.st;
     const now = Date.now();
     this.els.time.textContent = clockStr(now);
+    // Countdowns in offenen Panels jede halbe Sekunde nachführen
+    for (const e of document.querySelectorAll('[data-until]')) e.textContent = countdown(+e.dataset.until - now);
     this.els.date.textContent = `${dateStr(now)} · Tag ${missionDay(now, st.t0)}`;
 
     const sol = solar(now);
@@ -256,12 +258,19 @@ export const UI = {
     let cr = 0, xp = 0, n = 0, ups = 0;
     for (const s of ready) {
       const r = this.app.act.harvest(st, s.id);
-      if (r.ok && r.value) { cr += r.value.credits; xp += r.value.xp; n++; ups += r.levelUps || 0; }
+      if (r.ok && r.value) { cr += r.value.credits; xp += r.value.xp; n++; ups += r.levelUps || 0; this.harvestExtras(r); }
     }
     sfx.harvest();
     this.toast('ok', `${n}× geerntet`, `+${num(cr)} Cr · +${num(xp)} EP`);
     if (ups) this.levelUp(ups);
     this.app.save(); this.refresh(); this.app.syncScene();
+  },
+  /** Zusatzmeldungen einer Ernte: Erstfund und Auftragsfortschritt. */
+  harvestExtras(r) {
+    if (r.first) this.toast('xp', 'Erstfund-Prämie', `${r.plant.name} zum ersten Mal geerntet · +${num(r.first.credits)} Cr · +${num(r.first.xp)} EP`);
+    const c = r.contract;
+    if (c?.completed) { sfx.research(); this.toast('ok', 'Auftrag erfüllt', `${c.contract.qty}× ${r.plant.name} · +${num(c.contract.bonus)} Cr Prämie`); }
+    else if (c) this.toast('info', 'Auftrag', `${r.plant.name}: ${c.contract.have} von ${c.contract.qty}`);
   },
   levelUp(n) {
     sfx.levelup();

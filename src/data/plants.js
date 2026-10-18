@@ -36,7 +36,7 @@ export const PLANTS = [
 /* ───────────────────────── STUFE 1 — Der Probelauf ───────────────────────── */
 P({
   id: 'kresse', name: 'Gartenkresse', latin: 'Lepidium sativum', family: 'Kreuzblütler',
-  level: 1, seed: 8, value: 26, xp: 12, days: 10, germ: 2,
+  level: 1, seed: 8, value: 34, xp: 12, days: 10, germ: 2,
   dli: 6, dliMin: 3, water: 3, n: 4, ec: 1.0, ph: [5.5, 6.8], temp: [8, 18, 28],
   yieldG: 110, archetype: 'leafy', stages: 'leafy', pollinate: false, difficulty: 1,
   color: { leaf: 0x6fcf6f, accent: 0x9ade7a },
@@ -46,7 +46,7 @@ P({
 }),
 P({
   id: 'radieschen', name: 'Radieschen', latin: 'Raphanus sativus var. sativus', family: 'Kreuzblütler',
-  level: 1, seed: 14, value: 48, xp: 20, days: 25, germ: 4,
+  level: 1, seed: 14, value: 64, xp: 20, days: 25, germ: 4,
   dli: 10, dliMin: 5, water: 9, n: 10, ec: 1.6, ph: [6.0, 7.0], temp: [6, 16, 24],
   yieldG: 420, archetype: 'root', stages: 'root', pollinate: false, difficulty: 1,
   color: { leaf: 0x77c95e, accent: 0xe4436b },
@@ -56,7 +56,7 @@ P({
 }),
 P({
   id: 'salat', name: "Römersalat 'Outredgeous'", latin: 'Lactuca sativa', family: 'Korbblütler',
-  level: 1, seed: 20, value: 85, xp: 34, days: 45, germ: 5,
+  level: 1, seed: 20, value: 115, xp: 34, days: 45, germ: 5,
   dli: 14, dliMin: 7, water: 34, n: 22, ec: 1.2, ph: [5.5, 6.5], temp: [7, 18, 26],
   yieldG: 900, archetype: 'leafy', stages: 'leafy', pollinate: false, difficulty: 1,
   color: { leaf: 0x8e3f5a, accent: 0xc0586f },
@@ -68,7 +68,7 @@ P({
 /* ───────────────────────── STUFE 2 ───────────────────────── */
 P({
   id: 'rucola', name: 'Rucola', latin: 'Eruca vesicaria', family: 'Kreuzblütler',
-  level: 2, seed: 16, value: 66, xp: 26, days: 30, germ: 4,
+  level: 2, seed: 16, value: 88, xp: 26, days: 30, germ: 4,
   dli: 12, dliMin: 6, water: 16, n: 12, ec: 1.4, ph: [6.0, 7.0], temp: [8, 18, 25],
   yieldG: 320, archetype: 'leafy', stages: 'leafy', pollinate: false, difficulty: 1,
   color: { leaf: 0x5ea54a, accent: 0x88c76a },
@@ -78,7 +78,7 @@ P({
 }),
 P({
   id: 'spinat', name: 'Spinat', latin: 'Spinacia oleracea', family: 'Fuchsschwanzgewächse',
-  level: 2, seed: 22, value: 92, xp: 36, days: 40, germ: 6,
+  level: 2, seed: 22, value: 124, xp: 36, days: 40, germ: 6,
   dli: 14, dliMin: 7, water: 26, n: 20, ec: 1.8, ph: [6.0, 7.0], temp: [5, 16, 24],
   yieldG: 700, archetype: 'leafy', stages: 'leafy', pollinate: false, difficulty: 2,
   color: { leaf: 0x3f8c4e, accent: 0x63b06a },
@@ -88,7 +88,7 @@ P({
 }),
 P({
   id: 'basilikum', name: 'Basilikum', latin: 'Ocimum basilicum', family: 'Lippenblütler',
-  level: 2, seed: 26, value: 120, xp: 44, days: 60, germ: 7,
+  level: 2, seed: 26, value: 160, xp: 44, days: 60, germ: 7,
   dli: 20, dliMin: 11, water: 30, n: 24, ec: 1.6, ph: [5.5, 6.5], temp: [15, 24, 32],
   yieldG: 380, archetype: 'herb', stages: 'leafy', pollinate: false, difficulty: 2,
   color: { leaf: 0x4fa34a, accent: 0x7cc46a },
@@ -98,7 +98,7 @@ P({
 }),
 P({
   id: 'bohne', name: 'Zwergbuschbohne', latin: 'Phaseolus vulgaris', family: 'Hülsenfrüchtler',
-  level: 3, seed: 30, value: 150, xp: 54, days: 55, germ: 8,
+  level: 3, seed: 30, value: 195, xp: 54, days: 55, germ: 8,
   dli: 22, dliMin: 12, water: 45, n: 14, ec: 2.0, ph: [6.0, 6.8], temp: [12, 22, 30],
   yieldG: 600, archetype: 'bush', stages: 'fruit', pollinate: false, difficulty: 2,
   color: { leaf: 0x52a04a, accent: 0x93c16a },
@@ -110,7 +110,7 @@ P({
 /* ───────────────────────── STUFE 3 — Blüten & Früchte ───────────────────────── */
 P({
   id: 'tagetes', name: 'Studentenblume', latin: 'Tagetes patula', family: 'Korbblütler',
-  level: 3, seed: 24, value: 130, xp: 48, days: 50, germ: 6,
+  level: 3, seed: 24, value: 170, xp: 48, days: 50, germ: 6,
   dli: 15, dliMin: 8, water: 22, n: 16, ec: 1.4, ph: [6.0, 7.0], temp: [10, 22, 30],
   yieldG: 0, archetype: 'flower', stages: 'flower', pollinate: false, difficulty: 2,
   color: { leaf: 0x3e7d43, accent: 0xff9b2e },
@@ -120,7 +120,7 @@ P({
 }),
 P({
   id: 'zinnie', name: 'Zinnie', latin: 'Zinnia elegans', family: 'Korbblütler',
-  level: 3, seed: 34, value: 190, xp: 62, days: 60, germ: 6,
+  level: 3, seed: 34, value: 245, xp: 62, days: 60, germ: 6,
   dli: 16, dliMin: 9, water: 28, n: 18, ec: 1.5, ph: [5.8, 6.8], temp: [12, 23, 31],
   yieldG: 0, archetype: 'flower', stages: 'flower', pollinate: false, difficulty: 3,
   color: { leaf: 0x4a8c4e, accent: 0xff5f8a },

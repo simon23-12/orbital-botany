@@ -18,6 +18,7 @@ import * as S from './game/state.js';
 import * as SIM from './game/sim.js';
 import * as A from './game/actions.js';
 import { checkMail, unread } from './game/mail.js';
+import { photoWindow, stipendDue } from './game/requests.js';
 import { load, save as saveGame, newGame } from './core/save.js';
 import { solar, beta, BETA_CRIT, PERIOD, phase as orbitPhase } from './core/orbit.js';
 import { UI } from './ui/ui.js';
@@ -181,6 +182,9 @@ const app = {
     if (ready) rows.push(['scissors', `<b>${ready}</b> Kultur${ready > 1 ? 'en' : ''} erntereif`]);
     if (counts.delivery) rows.push(['rocket', `<b>${counts.delivery}</b> Frachtkapsel${counts.delivery > 1 ? 'n' : ''} angedockt`]);
     if (counts.research) rows.push(['beaker', `Forschung abgeschlossen: <b>${res.log.filter(e => e.type === 'research').map(e => e.name).join(', ')}</b>`]);
+    if (counts.experiment) rows.push(['flask', `Experiment abgeschlossen: <b>${res.log.filter(e => e.type === 'experiment').map(e => `${e.name} (+${num(e.credits)} Cr)`).join(', ')}</b>`]);
+    const stip = stipendDue(st);
+    if (stip.credits >= 20) rows.push(['star', `Missionszulage angesammelt: <b>${num(stip.credits)} Cr</b> — in der Lounge abholen`]);
     if (counts.module) rows.push(['rocket', `Modul montiert: <b>${res.log.filter(e => e.type === 'module').map(e => e.name).join(', ')}</b>`]);
     if (counts.sick) rows.push(['bug', `<b>${counts.sick}</b> Befall festgestellt`]);
     if (counts.death) rows.push(['alert', `<b>${counts.death}</b> Kultur eingegangen`]);
@@ -427,8 +431,20 @@ const app = {
     this.panelTimer = (this.panelTimer || 0) + dt;
     if (this.panelTimer > 3.5) {
       this.panelTimer = 0;
-      if (UI.panel && ['grow', 'lounge', 'research', 'shop', 'systems'].includes(UI.panel.id) && $('.modal[hidden]')) UI.render({ auto: true });
+      if (UI.panel && ['grow', 'lounge', 'research', 'shop', 'systems', 'cupola'].includes(UI.panel.id) && $('.modal[hidden]')) UI.render({ auto: true });
       this.syncScene();
+    }
+    /* Fotowunsch: Bescheid geben, sobald das Überflugfenster aufgeht */
+    this.wishTimer = (this.wishTimer || 0) + dt;
+    if (this.wishTimer > 2) {
+      this.wishTimer = 0;
+      const pw = photoWindow(st, nowMs);
+      if (pw.open && this._wishSeen !== pw.open.start) {
+        this._wishSeen = pw.open.start;
+        sfx.mail();
+        UI.toast('ok', 'Fotofenster offen', `${pw.req.region} · noch ${dur(pw.open.end - nowMs, { short: true })} — ab in die Cupola`, 9000);
+        if (UI.panel && ['lounge', 'cupola'].includes(UI.panel.id)) UI.render({ auto: true });
+      } else if (!pw.open && this._wishSeen && UI.panel?.id === 'cupola') { this._wishSeen = 0; UI.render({ auto: true }); }
     }
     this.mailTimer += dt;
     if (this.mailTimer > 25) {
@@ -448,6 +464,7 @@ const app = {
       else if (e.type === 'delivery') { sfx.dock(); UI.toast('ok', 'Fracht angedockt', 'Die Lieferung ist an Bord.'); this.rebuildStation(); }
       else if (e.type === 'research') { sfx.research(); UI.toast('xp', 'Forschung abgeschlossen', e.name); this.rebuildStation(); }
       else if (e.type === 'module') { sfx.dock(); UI.toast('xp', 'Modul montiert', e.name); this.rebuildStation(); UI.buildRooms(); }
+      else if (e.type === 'experiment') { sfx.research(); UI.toast('ok', 'Experiment abgeschlossen', `${e.name} · +${num(e.credits)} Cr`); }
       else if (e.type === 'sick') UI.toast('warn', 'Befall', `${e.name}: ${e.what}`);
       else if (e.type === 'power') UI.toast('warn', 'Energie knapp', 'Der Akku ist leer — die Lampen werden abgeregelt.');
     }

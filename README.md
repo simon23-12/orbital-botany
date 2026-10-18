@@ -24,6 +24,11 @@ Ein Salat braucht gut zwei Tage, eine Tomate vier, ein Säulenapfel fünfundvier
 Gedacht ist das Spiel als etwas, das man über Monate **zwischendurch** spielt.
 Ein paar Minuten morgens, ein paar abends.
 
+Geld kommt aus den Ernten, dazu aus einer täglichen **Missionszulage** (sammelt sich
+bis zu drei Tage an), **Aufträgen** von der Erde per Mail, einer **Erstfund-Prämie**
+für jede neue Art, **Laborexperimenten** neben der Forschung und Aufnahmen aus der
+Cupola.
+
 ## Was dabei hängen bleibt
 
 Sämtliche botanischen Kennzahlen im Spiel sind echt. Das ist der eigentliche Punkt:
@@ -77,7 +82,14 @@ Wände, geht unter und kommt auf der anderen Seite wieder.
 Die Cupola ist der ISS-Aussichtskuppel nachempfunden: sechs trapezförmige
 Seitenfenster um eine runde Mittelscheibe, dazwischen nur Rahmen — der Blick
 nach draußen ist rundum frei. Von dort lassen sich Aufnahmen der überflogenen
-Region machen, die das Erdbeobachtungsprogramm vergütet.
+Region machen, die das Erdbeobachtungsprogramm vergütet. Ab und zu wünscht sich
+die Bodenstation ein bestimmtes Motiv — etwa Indien bei Nacht. Die Überflugfenster
+dafür werden aus der Bodenspur vorausberechnet, ein Countdown zeigt, wann es so
+weit ist; die Wunschaufnahme zählt dreifach.
+
+Die **Pilzkammer** ist dunkel, kühl und neblig: Fruchtzelte mit Lamellenvorhang,
+dahinter hängende Substratsäulen, aus denen Austernseitlinge brechen, und ein
+Ultraschallvernebler, dessen Nebel am Boden zum Eingang zieht.
 
 Die **Schlafkammer** (ab Stufe 3) hat zwei Kabinen nach dem Vorbild der ISS-Crew-
 Quarters: gepolstert, mit eigener Lüftung — ohne Konvektion bliebe ausgeatmetes

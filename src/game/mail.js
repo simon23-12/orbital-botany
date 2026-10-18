@@ -5,6 +5,7 @@ import * as S from './state.js';
 import { beta, BETA_CRIT } from '../core/orbit.js';
 import { uid, HOUR, DAY, clamp, pick, missionDay } from '../core/util.js';
 import { emit } from '../core/events.js';
+import { makeContract, pruneContracts, makePhotoRequest, prunePhotoRequest } from './requests.js';
 
 /** Platzhalter füllen. */
 export function format(text, st) {
@@ -97,6 +98,20 @@ export function checkMail(st, now = Date.now()) {
     st.mail.seriesIdx++;
     st.mail.nextSeriesAt = now + (30 + Math.random() * 14) * HOUR;
   }
+
+  /* Aufträge: alle anderthalb bis zwei Tage einer, höchstens zwei offen. Der erste kommt bald. */
+  pruneContracts(st, now);
+  st.mail.nextContractAt ??= now + 2 * HOUR;
+  if (now >= st.mail.nextContractAt) {
+    const tpl = makeContract(st, now);
+    if (tpl) out.push(deliver(st, tpl, now));
+    st.mail.nextContractAt = now + (tpl ? 30 + Math.random() * 20 : 6) * HOUR;
+  }
+
+  /* Fotowünsche: einer zur Zeit, mit berechneten Überflugfenstern. */
+  prunePhotoRequest(st, now);
+  const photo = makePhotoRequest(st, now);
+  if (photo) out.push(deliver(st, photo, now));
 
   /* Gelegentliche Lebenszeichen. */
   if (now >= (st.mail.nextFlavorAt || 0)) {

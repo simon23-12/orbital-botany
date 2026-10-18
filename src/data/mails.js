@@ -12,6 +12,7 @@ export const PEOPLE = {
   ayo:   { name: 'Prof. Ayo Bello',     role: 'Botanik · Emeritus, Ibadan',                addr: 'a.bello@uni-ibadan.ng',   tone: 'leaf' },
   nour:  { name: 'Nour Haddad',         role: 'Flugleitung · Nachtschicht',                addr: 'n.haddad@oab.esa.int',    tone: 'violet' },
   lena:  { name: 'Lena',                role: 'deine Schwester',                           addr: 'lena@privat',             tone: 'rose' },
+  geo:   { name: 'Jun Watanabe',        role: 'Erdbeobachtung · Bildauswertung',            addr: 'j.watanabe@oab.esa.int',  tone: 'cyan' },
   sys:   { name: 'HEDERA · Bordsystem', role: 'automatische Meldung',                      addr: 'core@hedera.station',     tone: '' },
 };
 

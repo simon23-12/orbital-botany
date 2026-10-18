@@ -1,5 +1,5 @@
 /*  Alle Panels der Oberfläche. */
-import { el, $, $$, clear, num, compact, vol, watt, grams, dur, dateFull, missionDay, clamp, clamp01, esc, richText, HOUR, MIN, DAY } from '../core/util.js';
+import { el, $, $$, clear, num, compact, vol, watt, grams, dur, countdown, dateFull, missionDay, clamp, clamp01, esc, richText, HOUR, MIN, DAY } from '../core/util.js';
 import { icon, plantSvg, plantIcon } from './icons.js';
 import * as S from '../game/state.js';
 import * as SIM from '../game/sim.js';
@@ -11,6 +11,8 @@ import { CATALOG, SHOP_BY_ID, SUPPLIES, COMFORT, QUARTERS, freightFor } from '..
 import { openMail, personOf, markAllRead, unread } from '../game/mail.js';
 import { solar, PERIOD, V_ORB, ALT, A as ORBIT_A, BETA_CRIT, beta, EARTH_ANGULAR, HORIZON, distanceTravelled, orbits, eclipseFraction, groundTrack, groundHeading, regionAt, formatCoords } from '../core/orbit.js';
 import { sfx } from '../audio/sfx.js';
+import * as RQ from '../game/requests.js';
+import { EXPERIMENTS, EXP_BY_ID } from '../data/requests.js';
 import { exportFile, importText, wipe } from '../core/save.js';
 import { music } from '../audio/music.js';
 
@@ -69,6 +71,19 @@ export function lounge(app, arg, UI) {
     el('div', { class: 'kv' }, el('span', { text: `Stufe ${st.level}` }), el('b', { text: `${num(lvl.have)} / ${num(lvl.need)} EP` })),
   ));
 
+  /* Missionszulage */
+  const stip = RQ.stipendDue(st, now);
+  body.push(el('div', { class: 'card', style: { display: 'flex', alignItems: 'center', gap: '.8rem' } },
+    el('span', { class: 'card__ic', html: icon('star'), style: { color: 'var(--amber)' } }),
+    el('div', { style: { flex: 1, minWidth: 0 } },
+      el('div', { class: 'kv', style: { margin: 0 }, 'data-tip': `<b>Missionszulage</b>${num(RQ.stipendRate(st))} Cr pro Tag, je Stufe 15 mehr. Sammelt sich bis zu drei Tage an — danach geht nichts verloren, es kommt nur nichts mehr dazu.` },
+        el('span', { text: 'Missionszulage' }), el('b', { text: `${num(stip.credits)} Cr` })),
+      bar(stip.span / RQ.STIPEND_CAP, 'var(--amber)'),
+      el('span', { class: 'sub', text: stip.full ? 'Drei Tage voll — abholen, sonst sammelt sich nichts mehr an.' : `${num(RQ.stipendRate(st))} Cr am Tag · voll in ${dur(RQ.STIPEND_CAP - stip.span, { short: true })}` })),
+    el('button', { class: 'btn btn--sm btn--primary', disabled: stip.credits < 1, html: icon('download') + 'Abholen',
+      onclick: () => { const r = A.collectStipend(st); if (r.ok) { sfx.research(); UI.toast('ok', 'Missionszulage', `+${num(r.credits)} Cr`); app.save(); UI.render(); UI.tickHud(); } } }),
+  ));
+
   /* Aufgaben */
   const ready = st.slots.filter(s => s.plant && s.prog >= 1);
   const dead = st.slots.filter(s => s.dead);
@@ -90,6 +105,17 @@ export function lounge(app, arg, UI) {
     const r = st.research.active;
     tasks.push(['info', 'beaker', `${RES_BY_ID[r.id]?.name}: noch ${dur(r.endsAt - now, { short: true })}`, () => UI.open('research')]);
   }
+  if (stip.full) tasks.push(['ok', 'star', `Missionszulage voll: ${num(stip.credits)} Cr abholen`, () => { const r = A.collectStipend(st); if (r.ok) { sfx.research(); UI.toast('ok', 'Missionszulage', `+${num(r.credits)} Cr`); app.save(); UI.render(); UI.tickHud(); } }]);
+  const pw = RQ.photoWindow(st, now);
+  if (pw.req && !pw.req.done) {
+    const w = pw.open || pw.next;
+    tasks.push([pw.open ? 'ok' : 'info', 'eye', w ? `Fotowunsch ${pw.req.region}: ${pw.open ? 'Fenster offen, noch ' : 'Fenster in '}<span class="mono" data-until="${pw.open ? w.end : w.start}">${countdown((pw.open ? w.end : w.start) - now)}</span>`
+      : `Fotowunsch ${pw.req.region}: kein Überflug mehr bis zum Ablauf`, () => app.goRoom('cupola')]);
+  }
+  if (st.experiment) {
+    const x = st.experiment;
+    tasks.push(['info', 'flask', `${EXP_BY_ID[x.id]?.name}: noch ${dur(x.endsAt - now, { short: true })}`, () => UI.open('research')]);
+  } else if (st.modules.lab?.built) tasks.push(['info', 'flask', 'Labor frei — ein Experiment ansetzen', () => app.goRoom('lab')]);
   const arriving = st.orders.filter(o => !o.done);
   for (const o of arriving) tasks.push(['info', 'rocket', `Fracht dockt in ${dur(o.arrivesAt - now, { short: true })} an`, () => UI.open('shop')]);
 
@@ -102,9 +128,25 @@ export function lounge(app, arg, UI) {
       onclick: fn || (() => {}),
     },
       el('span', { class: 'card__ic', html: icon(ic), style: { color: `var(--${kind === 'ok' ? 'leaf' : kind === 'warn' ? 'amber' : kind === 'bad' ? 'bad' : 'cyan'})` } }),
-      el('span', { text, style: { flex: '1', fontSize: '.88rem' } }),
+      el('span', { html: text, style: { flex: '1', fontSize: '.88rem' } }),
       fn ? el('span', { html: icon('check'), style: { opacity: .4, display: 'flex' } }) : null,
     ));
+  }
+
+  /* Aufträge von der Erde */
+  const cons = RQ.openContracts(st, now);
+  if (cons.length) {
+    body.push(secT('Aufträge von der Erde'));
+    for (const c of cons) {
+      const p = PL[c.plant];
+      body.push(el('div', { class: 'card' },
+        el('div', { class: 'card__t' },
+          el('h3', { text: `${c.qty}× ${p?.name || c.plant}` }),
+          el('span', { class: 'chip chip--amber', text: `+${num(c.bonus)} Cr` })),
+        el('p', { class: 'card__d', style: { margin: '.1rem 0 .5rem', fontSize: '.8rem' }, text: `für ${personOf(c.from).name} · Ernte bis ${dateFull(c.due)}` }),
+        bar(c.have / c.qty, 'var(--amber)'),
+        el('div', { class: 'kv' }, el('span', { text: `${c.have} von ${c.qty} geerntet` }), el('b', { text: `noch ${dur(c.due - now, { short: true })}` }))));
+    }
   }
 
   /* Blick nach draußen */
@@ -209,6 +251,45 @@ export function cupola(app, arg, UI) {
     kv('Nächster Überflug derselben Stelle', `${(PERIOD / 60000).toFixed(0)} min später, ${num(24.5, 1)}° weiter westlich`),
   ));
 
+  /* Fotowunsch der Bodenstation */
+  const pw = RQ.photoWindow(st, now);
+  const hit = RQ.photoRequestHit(st, { region, lit: sol.lit }, now);
+  if (pw.req) {
+    const q = pw.req;
+    const card = el('div', { class: 'card', style: { borderColor: pw.open ? 'rgba(95,217,142,.55)' : 'rgba(79,214,255,.35)', background: pw.open ? 'rgba(95,217,142,.08)' : 'rgba(79,214,255,.05)' } });
+    card.append(el('div', { class: 'card__t' },
+      el('h3', { text: `Fotowunsch: ${q.region}` }),
+      el('span', { class: 'chip ' + (q.done ? 'chip--leaf' : q.lit ? 'chip--amber' : 'chip--violet'), text: q.done ? 'erledigt' : q.lit ? 'Tagseite' : 'Nachtseite' })));
+    if (q.done) card.append(el('p', { class: 'card__d', style: { margin: 0 }, text: 'Die Aufnahme ist angekommen. Ein neuer Wunsch folgt in ein paar Stunden.' }));
+    else {
+      card.append(el('p', { class: 'card__d', style: { fontSize: '.8rem' }, text: q.why }));
+      const big = (label, t, color) => el('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '.6rem', margin: '.2rem 0' } },
+        el('span', { class: 'sub', text: label }),
+        el('b', { class: 'mono', 'data-until': String(t), text: countdown(t - now), style: { fontSize: '1.5rem', color } }));
+      if (pw.open) {
+        card.append(big('Fenster offen — schließt in', pw.open.end, 'var(--leaf)'));
+      } else if (pw.next) {
+        card.append(big('Nächstes Fenster öffnet in', pw.next.start, 'var(--cyan)'));
+        card.append(kv('Öffnet um', new Date(pw.next.start).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr'));
+        card.append(kv('Dauer', dur(pw.next.end - pw.next.start, { short: true })));
+      } else card.append(el('p', { class: 'card__d', text: 'Bis der Wunsch verfällt, kommt die Station nicht mehr passend darüber.' }));
+      const more = (q.windows || []).filter(w => w.start > now && (pw.open || w !== pw.next)).length;
+      card.append(kv('Weitere Fenster', more ? String(more) : 'keine'));
+      card.append(kv('Gültig noch', dur(q.expires - now, { short: true })));
+      card.append(el('button', {
+        class: 'btn btn--primary btn--block', disabled: !hit, style: { marginTop: '.5rem' },
+        onclick: () => {
+          const r = A.photograph(st, { region, lat: g.lat, lon: g.lon, lit: sol.lit });
+          if (r.ok) { sfx.research(); UI.toast('ok', 'Fotowunsch erfüllt', `${region} · +${num(r.credits)} Cr · +${num(r.xp)} EP`); app.save(); UI.render(); }
+          else { sfx.error(); UI.toast('info', 'Noch nicht', r.msg); }
+        },
+        html: icon('eye') + (hit ? 'Wunschaufnahme machen (×3)' : 'Wunschaufnahme — wartet aufs Fenster'),
+      }));
+    }
+    body.push(secT('Auftrag der Bodenstation'));
+    body.push(card);
+  }
+
   /* Erdbeobachtung */
   const last = st.flags.lastPhoto || 0;
   const ready = now - last >= A.PHOTO_COOLDOWN;
@@ -234,7 +315,7 @@ export function cupola(app, arg, UI) {
     const seen = new Set();
     for (const e of log.slice(0, 12)) {
       body.push(el('div', { class: 'kv' },
-        el('span', { html: `${esc(e.region)} ${e.night ? '<span class="chip chip--violet">Nacht</span>' : ''}` }),
+        el('span', { html: `${esc(e.region)} ${e.night ? '<span class="chip chip--violet">Nacht</span>' : ''} ${e.wish ? '<span class="chip chip--leaf">Wunsch</span>' : ''}` }),
         el('b', { text: dateFull(e.at).split(',')[0] })));
       seen.add(e.region);
     }
@@ -416,6 +497,7 @@ function pickPlant(app, slot, UI) {
     html += `<div class="hint hint--amber" style="margin-top:1rem">${icon('alert')}<div><b>Keine Substratpads mehr.</b> Jede Kultur braucht ein Pad, deshalb ist gerade nichts wählbar.
       ${st.padWash?.queue ? `In der Spülung: ${st.padWash.queue}, das nächste ist in ${dur(Math.max(0, st.padWash.nextAt - Date.now()), { short: true })} fertig.` : coming.length ? `Nachschub dockt in ${dur(Math.max(0, eta), { short: true })} an.` : `<br><button class="btn btn--sm" data-shop style="margin-top:.5rem">${icon('box')}Substratpads bestellen</button>`}</div></div>`;
   }
+  const wanted = new Set(RQ.openContracts(st).map(c => c.plant));
   html += `<div class="pick" style="margin-top:1rem">`;
   for (const p of avail) {
     const have = st.seeds[p.id] || 0;
@@ -423,7 +505,7 @@ function pickPlant(app, slot, UI) {
     const dis = locked || have < 1 || noPad;
     html += `<button class="pickitem" data-p="${p.id}" ${dis ? 'disabled' : ''}>
       <span class="pickitem__ic">${plantSvg(p, .9, 1, p.id, 3)}</span>
-      <span class="pickitem__m"><b>${esc(p.name)}</b><span>${locked ? 'ab Stufe ' + p.level : `${have} Samen · ${(cycleMs(p) / HOUR).toFixed(0)} h · DLI ${p.dli}`}</span></span>
+      <span class="pickitem__m"><b>${esc(p.name)}</b><span>${locked ? 'ab Stufe ' + p.level : `${have} Samen · ${(cycleMs(p) / HOUR).toFixed(0)} h · DLI ${p.dli}`}</span>${locked ? '' : (wanted.has(p.id) ? '<span style="color:var(--amber)">Auftrag offen</span>' : '') + (!st.codex[p.id]?.harvested ? '<span style="color:var(--leaf)">Erstfund-Prämie +' + num(RQ.firstFindBonus(p).credits) + ' Cr</span>' : '')}</span>
     </button>`;
   }
   html += `</div>`;
@@ -513,7 +595,7 @@ function slotDetail(app, s, UI) {
         let r;
         if (act === 'harvest') {
           r = A.harvest(st, s.id);
-          if (r.ok) { sfx.harvest(); UI.toast('ok', 'Geerntet', `${p.name} · +${num(r.value.credits)} Cr · +${num(r.value.xp)} EP${r.seedBack ? ' · 1 Samen zurückgewonnen' : ''}${r.padBack ? ' · Pad geht in die Spülung' : ''}`); if (r.levelUps) UI.levelUp(r.levelUps); }
+          if (r.ok) { sfx.harvest(); UI.toast('ok', 'Geerntet', `${p.name} · +${num(r.value.credits)} Cr · +${num(r.value.xp)} EP${r.seedBack ? ' · 1 Samen zurückgewonnen' : ''}${r.padBack ? ' · Pad geht in die Spülung' : ''}`); UI.harvestExtras(r); if (r.levelUps) UI.levelUp(r.levelUps); }
         } else if (act === 'water') { r = A.waterSlot(st, s.id); if (r.ok) sfx.water(); }
         else if (act === 'pollen') { r = A.pollinate(st, s.id); if (r.ok) { sfx.research(); UI.toast('ok', 'Bestäubt', r.msg); } }
         else if (act === 'treat') { r = A.treat(st, s.id); if (r.ok) UI.toast('ok', 'Behandelt', r.msg); }
@@ -722,7 +804,35 @@ export function research(app, tab, UI) {
       bar(pct, 'var(--violet)'),
       el('div', { class: 'kv' }, el('span', { text: 'Fertig in' }), el('b', { text: dur(act.endsAt - now) }))));
   } else {
-    body.push(hint('Forschung kostet Credits und echte Zeit — sie läuft weiter, während du offline bist. Es kann immer nur ein Vorhaben gleichzeitig laufen.'));
+    body.push(hint('Forschung kostet Credits und echte Zeit — sie läuft weiter, während du offline bist. Es kann immer nur ein Vorhaben gleichzeitig laufen. Experimente laufen unabhängig davon und zahlen beim Abschluss aus.'));
+  }
+
+  /* Experimente: laufen neben der Forschung, eines zur Zeit, zahlen beim Abschluss aus */
+  body.push(secT('Experimente'));
+  const xp = st.experiment;
+  for (const e of EXPERIMENTS) {
+    const run = xp?.id === e.id;
+    const rw = RQ.experimentReward(st, e);
+    const card = el('div', { class: 'card', style: run ? { borderColor: 'rgba(79,214,255,.45)', background: 'rgba(79,214,255,.06)' } : {} });
+    card.append(el('div', { class: 'card__t' },
+      el('h3', { text: e.name }),
+      el('span', { class: 'chip ' + (run ? 'chip--cyan' : 'chip--amber'), text: run ? 'läuft' : `${e.hours} h · +${num(rw.credits)} Cr` })));
+    card.append(el('p', { class: 'card__d', text: e.desc }));
+    if (run) {
+      card.append(bar(clamp01((now - xp.startedAt) / (xp.endsAt - xp.startedAt)), 'var(--cyan)'));
+      card.append(el('div', { class: 'kv' }, el('span', { text: 'Fertig in' }), el('b', { class: 'mono', 'data-until': String(xp.endsAt), text: countdown(xp.endsAt - now) })));
+    } else {
+      card.append(el('button', {
+        class: 'btn btn--sm', disabled: !!xp, html: icon('flask') + 'Ansetzen',
+        onclick: () => {
+          const r = A.startExperiment(st, e.id);
+          if (r.ok) { sfx.research(); UI.toast('ok', 'Experiment läuft', `${e.name} · fertig in ${e.hours} h`); app.save(); UI.render(); }
+          else { sfx.error(); UI.toast('bad', 'Nicht möglich', r.msg); }
+        },
+      }));
+    }
+    card.append(el('div', { class: 'fact', style: { marginTop: '.6rem', fontSize: '.8rem' }, html: richText(e.fact) }));
+    body.push(card);
   }
 
   for (const branch of BRANCHES) {

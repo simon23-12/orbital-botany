@@ -6,6 +6,7 @@ import { RES_BY_ID } from '../data/research.js';
 import { SHOP_BY_ID, freightFor } from '../data/shop.js';
 import * as S from './state.js';
 import { harvestValue, analyse } from './sim.js';
+import * as RQ from './requests.js';
 import { clamp, clamp01, uid, HOUR } from '../core/util.js';
 import { emit } from '../core/events.js';
 
@@ -102,6 +103,7 @@ export function harvest(st, slotId) {
   const p = PLANT_BY_ID[s.plant];
   if (s.dead) return clearSlot(st, slotId);
   if (s.prog < 1) return no('Noch nicht erntereif');
+  const lvl0 = st.level;
   const v = harvestValue(st, s);
   st.credits += v.credits;
   st.stats.earned += v.credits;
@@ -109,15 +111,24 @@ export function harvest(st, slotId) {
   st.stats.massG += v.massG;
   const ups = S.addXp(st, v.xp);
   const c = st.codex[s.plant] ||= { seen: true, harvested: 0 };
+  /* Erstfund: die erste Ernte einer Art ist für die Wissenschaft etwas wert */
+  let first = null;
+  if (!c.harvested) {
+    first = RQ.firstFindBonus(p);
+    st.credits += first.credits; st.stats.earned += first.credits;
+    st.stats.firstFinds = (st.stats.firstFinds || 0) + 1;
+    S.addXp(st, first.xp);
+  }
   c.harvested++; c.best = Math.max(c.best || 0, v.quality);
+  const contract = RQ.creditContract(st, s.plant);
   let seedBack = 0;
   if (S.hasRes(st, 'seedbank') && Math.random() < 0.35) {
     seedBack = 1; st.seeds[s.plant] = (st.seeds[s.plant] || 0) + 1;
   }
   const padBack = S.queuePadWash(st);
   Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0 });
-  emit('harvest', { plant: p, value: v, levelUps: ups, seedBack });
-  return ok(`${p.name} geerntet`, { value: v, levelUps: ups, seedBack, padBack, plant: p });
+  emit('harvest', { plant: p, value: v, levelUps: st.level - lvl0, seedBack });
+  return ok(`${p.name} geerntet`, { value: v, levelUps: st.level - lvl0, seedBack, padBack, plant: p, first, contract });
 }
 
 export function clearSlot(st, slotId) {
@@ -241,21 +252,25 @@ export const PHOTO_COOLDOWN = 3 * HOUR;
 export function photograph(st, info) {
   const last = st.flags.lastPhoto || 0;
   const now = Date.now();
-  if (now - last < PHOTO_COOLDOWN) return no('Die Bodenstation nimmt erst wieder eine neue Aufnahme an');
-  st.flags.lastPhoto = now;
+  /* Ein Fotowunsch der Bodenstation zählt nicht gegen die Sperrzeit */
+  const wish = RQ.photoRequestHit(st, info, now);
+  if (!wish && now - last < PHOTO_COOLDOWN) return no('Die Bodenstation nimmt erst wieder eine neue Aufnahme an');
+  if (!wish) st.flags.lastPhoto = now;
   const land = !/Ozean|Meer|See$/.test(info.region);
   const scope = st.comfort.includes('telescope') ? 1.6 : 1;
-  const credits = Math.round((land ? 120 : 70) * (info.lit ? 1 : 1.35) * scope);
-  const xp = Math.round((land ? 26 : 16) * scope);
+  const mult = wish ? RQ.PHOTO_BONUS : 1;
+  const credits = Math.round((land ? 120 : 70) * (info.lit ? 1 : 1.35) * scope * mult);
+  const xp = Math.round((land ? 26 : 16) * scope * mult);
+  if (wish) RQ.completePhotoRequest(st, now);
   st.credits += credits;
   st.stats.earned += credits;
   st.stats.photos = (st.stats.photos || 0) + 1;
   const log = st.flags.photoLog ||= [];
-  log.unshift({ at: now, region: info.region, lat: info.lat, lon: info.lon, night: !info.lit, credits });
+  log.unshift({ at: now, region: info.region, lat: info.lat, lon: info.lon, night: !info.lit, credits, wish });
   if (log.length > 40) log.length = 40;
   S.addXp(st, xp);
   emit('photo', { region: info.region, credits });
-  return ok(`${info.region} aufgenommen`, { credits, xp });
+  return ok(`${info.region} aufgenommen`, { credits, xp, wish });
 }
 
 export function useCo2Cartridge(st) {
@@ -263,4 +278,20 @@ export function useCo2Cartridge(st) {
   st.flags.co2cart--;
   st.co2Target = Math.min(1600, st.co2Target + 300);
   return ok('CO₂ angehoben');
+}
+
+/* ───────────────────────── Nebeneinkünfte ───────────────────────── */
+
+export function collectStipend(st) {
+  const c = RQ.collectStipend(st);
+  if (!c) return no('Noch nichts angesammelt');
+  return ok(`Missionszulage: ${c} Cr`, { credits: c });
+}
+
+export function startExperiment(st, id) {
+  if (st.experiment) return no('Es läuft schon ein Experiment');
+  const x = RQ.startExperiment(st, id);
+  if (!x) return no('Unbekanntes Experiment');
+  emit('experiment', id);
+  return ok('Experiment angesetzt');
 }

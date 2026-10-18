@@ -14,6 +14,7 @@ import * as S from './state.js';
 import { solar, PERIOD, meanSun } from '../core/orbit.js';
 import { clamp, clamp01, lerp, HOUR, MIN, DAY, rng, hash } from '../core/util.js';
 import { emit } from '../core/events.js';
+import { finishExperiment } from './requests.js';
 
 const { CONST } = S;
 
@@ -306,6 +307,9 @@ function processTimed(st, t, log) {
     w.queue--;
     w.nextAt = w.queue ? w.nextAt + S.PAD_WASH_MS : 0;
   }
+
+  /* Laborexperiment */
+  finishExperiment(st, t, log);
 
   /* Forschung */
   const r = st.research.active;

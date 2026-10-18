@@ -41,6 +41,10 @@ export function freshState(name = 'Kommandant') {
     nutrients: 800,
     substrate: 12,
     padWash: { queue: 0, nextAt: 0 },   // Pads in der Spülung
+    stipend: { since: now },            // Missionszulage sammelt sich ab hier
+    contracts: [],                      // Aufträge von der Erde
+    photoReq: null,                     // aktueller Fotowunsch
+    experiment: null,                   // laufendes Laborexperiment
     battery: CONST.BATTERY_KWH * 0.85,
     co2Target: CONST.BASE_CO2,
     tempTarget: CONST.BASE_TEMP,
@@ -59,6 +63,7 @@ export function freshState(name = 'Kommandant') {
     stats: {
       planted: 0, harvested: 0, deaths: 0, massG: 0, earned: 0, spent: 0,
       waterUsed: 0, waterRecovered: 0, deliveries: 0, pollinated: 0, researchDone: 0, photos: 0,
+      experiments: 0, contracts: 0, photoRequests: 0, firstFinds: 0,
     },
     flags: {},
     settings: { music: true, musicVol: 0.55, sfx: true, sfxVol: 0.6, quality: 'auto', bloom: true, reduceMotion: false },

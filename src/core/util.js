@@ -72,6 +72,12 @@ export function dur(ms, opts = {}) {
   if (s && !d && !h && parts.length < max) parts.push(short ? s + 's' : s + ' Sek');
   return parts.slice(0, max).join(' ') || (short ? '0s' : 'jetzt');
 }
+/** Countdown für Anzeigen, die jede Sekunde nachgeführt werden: unter einer Stunde als m:ss. */
+export function countdown(ms) {
+  if (ms <= 0) return '0:00';
+  if (ms < HOUR) { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+  return dur(ms, { short: true });
+}
 export function clockStr(t) {
   return new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
