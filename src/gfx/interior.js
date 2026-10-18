@@ -364,6 +364,40 @@ function mistTexture() {
   return _mist;
 }
 
+/** Senkrechte Wasserfäden für den Rücklauf; wird per Versatz nach unten geschoben. */
+function waterStreamTexture() {
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 128;
+  const x = c.getContext('2d');
+  const r = rng(11);
+  for (let i = 0; i < 26; i++) {
+    const px = 4 + r() * 24, y = r() * 128, h = 10 + r() * 40, w = .8 + r() * 1.8;
+    const gr = x.createLinearGradient(0, y, 0, y + h);
+    gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(.5, `rgba(255,255,255,${.4 + r() * .5})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = gr; x.fillRect(px, y, w, h); x.fillRect(px, y - 128, w, h);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Luftblase: heller Rand, durchsichtige Mitte. */
+let _bubble = null;
+function bubbleTexture() {
+  if (_bubble) return _bubble;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(16, 16, 6, 16, 16, 15);
+  gr.addColorStop(0, 'rgba(255,255,255,.08)'); gr.addColorStop(.75, 'rgba(255,255,255,.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.beginPath(); x.arc(16, 16, 15, 0, TAU); x.fill();
+  x.fillStyle = 'rgba(255,255,255,.9)'; x.beginPath(); x.arc(11, 11, 2.5, 0, TAU); x.fill();
+  _bubble = new THREE.CanvasTexture(c);
+  _bubble.colorSpace = THREE.SRGBColorSpace;
+  return _bubble;
+}
+
 const ROOMS = {
 
   /* ══ LOUNGE ══ */
@@ -848,6 +882,7 @@ const ROOMS = {
     if (def.sunlit) return ROOMS.dome(st, ctx, modId, g, slots);
     if (modId === 'vertical') return ROOMS.tower(st, ctx, modId, g, slots, ports);
     if (def.dark) return ROOMS.mycology(st, ctx, modId, ports);
+    if (modId === 'hydro') return ROOMS.hydro(st, ctx, modId, ports);
 
     const dark = !!def.dark;
     const LEN = clamp(4.5 + n * 0.5, 5, 11), RAD = 2.4;
@@ -1147,6 +1182,225 @@ const ROOMS = {
     g.add(new THREE.AmbientLight(0x34403f, .22));
     ctx.profile = { keepTint: true, envI: .1 };
     ctx.camera = { pos: new THREE.Vector3(-LEN * .42, -.05, .02), look: new THREE.Vector3(LEN * .5, -.15, 0) };
+    return g;
+  },
+
+  /* ══ HYDROPONIK ══
+     Nährfilmtechnik: lange weiße Rinnen, leicht geneigt, ein Film aus Nährlösung
+     läuft darin zum Rücklauf. Rot-blaues Pflanzenlicht taucht alles in Magenta,
+     hinten leuchten die Vorratstanks. */
+  hydro(st, ctx, modId, ports = {}) {
+    const M = mats();
+    const g = new THREE.Group();
+    const slots = st.slots.filter(s => s.mod === modId);
+    const n = slots.length;
+    const tiers = n > 8 ? 3 : 2;
+    const LEN = n > 8 ? 8.2 : 7.4, RAD = 2.4;
+    g.add(shell(LEN, RAD, M, { color: 0x8c8e9a, endTint: 0xa4a6b0, ends: { neg: 'port', pos: ports.far ? 'port' : 'closed' } }));
+    dressModule(g, { len: LEN, rad: RAD, zones: ['ceiling', 'ends'], seed: 91,
+      neg: { to: ports.nearName, laptop: 2 }, pos: ports.far ? { to: ports.farName } : { extinguisher: true } });
+    ctx.dims = { outward: new THREE.Vector3(1, 0, 0), inDist: LEN / 2, outDist: LEN / 2 };
+    ctx.walk = [[cylR('x', [0, 0, 0], RAD - .45, LEN / 2 - .3), boxR([-BIG, -RAD * .72 + .5, -.82], [BIG, BIG, .82])]];
+    const floorTop = -RAD * .72 + .04;
+    const tickers = ctx.tickers = [];
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+    const white = new THREE.MeshStandardMaterial({ color: 0xf1f3f2, roughness: .38, metalness: 0 });
+    const alu = new THREE.MeshStandardMaterial({ color: 0xc4c9cf, roughness: .32, metalness: .85 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: .7 });
+    const blue = new THREE.MeshStandardMaterial({ color: 0x2f7fd2, roughness: .35, metalness: .1 });
+    const ledMat = () => new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff4fd2, emissiveIntensity: 1.9, roughness: .3 });
+    const ledDeco = ledMat();
+    const pipe = (a, b, r, mat) => {
+      const d = new THREE.Vector3().subVectors(b, a);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 10), mat);
+      m.position.copy(a).addScaledVector(d, .5);
+      m.quaternion.setFromUnitVectors(UP, d.normalize());
+      g.add(m);
+      return m;
+    };
+
+    /* Regale: je Seite `tiers` Etagen mit drei parallelen Rinnen */
+    const XA = -2.75, XB = 2.15, RL = XB - XA, XC = (XA + XB) / 2;
+    const ZC = 1.28, CW = .14, CG = .045;
+    const TY = tiers === 3 ? [.42, 1.04, 1.66] : [.55, 1.3];
+    const tierY = TY.map(v => floorTop + v);
+    const ledUp = tiers === 3 ? .5 : .56;
+    const SLOPE = .012;                                  // 1,2 % Gefälle zum Rücklauf
+    const potGeo = new THREE.CylinderGeometry(.026, .02, .03, 10, 1, true);
+    const pots = [], sprouts = [];
+    const streams = [];
+    const streamTex = waterStreamTexture();
+    for (const side of [-1, 1]) {
+      for (let k = 0; k < tiers; k++) {
+        const y0 = tierY[k];
+        const tier = new THREE.Group();
+        tier.position.set(XC, y0, side * ZC);
+        tier.rotation.z = -SLOPE;
+        g.add(tier);
+        for (let c = -1; c <= 1; c++) {
+          const ch = new THREE.Mesh(new THREE.BoxGeometry(RL, .07, CW), white);
+          ch.position.set(0, 0, c * (CW + CG));
+          tier.add(ch);
+          // Pflanzlöcher im Deckel
+          for (let x = -RL / 2 + .18; x < RL / 2 - .1; x += .2) pots.push({ tier, p: V(x, .036, c * (CW + CG)), x });
+        }
+        // Querträger und Lampenbalken
+        for (const x of [-RL / 2 + .1, 0, RL / 2 - .1]) {
+          const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .04, .6), alu);
+          b.position.set(x, -.06, 0); tier.add(b);
+        }
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(RL, .035, .06), alu);
+        beam.position.set(0, ledUp + .05, -side * .02); tier.add(beam);
+        const deco = new THREE.Mesh(new THREE.BoxGeometry(RL - .1, .018, .08), ledDeco);
+        deco.position.set(0, ledUp + .02, 0); tier.add(deco);
+        // Rücklaufrinne quer am tiefen Ende, Wasser fällt sichtbar hinein
+        const gut = new THREE.Mesh(new THREE.BoxGeometry(.12, .1, .6), white);
+        gut.position.set(RL / 2 + .07, -.06, 0); tier.add(gut);
+        for (let c = -1; c <= 1; c++) {
+          const w = new THREE.Mesh(new THREE.PlaneGeometry(.06, .07),
+            new THREE.MeshBasicMaterial({ map: streamTex.clone(), color: 0x9fd8ff, transparent: true, opacity: .75, depthWrite: false, side: THREE.DoubleSide }));
+          w.material.map.needsUpdate = true;
+          w.position.set(RL / 2 + .035, -.035, c * (CW + CG));
+          w.rotation.y = Math.PI / 2;
+          tier.add(w);
+          streams.push(w.material.map);
+        }
+        // Zulauf: dünne Schläuche vom Steigrohr in jeden Rinnenkopf
+        tier.updateMatrixWorld(true);
+        for (let c = -1; c <= 1; c++) {
+          const head = tier.localToWorld(V(-RL / 2 + .02, .03, c * (CW + CG)));
+          pipe(V(XA - .12, y0 + .1, side * (ZC + .2)), head, .006, black);
+        }
+      }
+      // Pfosten, Steigrohr (Zulauf), Fallrohr (Rücklauf)
+      for (const x of [XA, XC, XB]) for (const dz of [-.3, .3]) pipe(V(x, floorTop, side * ZC + dz), V(x, tierY[tiers - 1] + ledUp + .1, side * ZC + dz), .022, alu);
+      pipe(V(XA - .12, floorTop + .05, side * (ZC + .2)), V(XA - .12, tierY[tiers - 1] + .14, side * (ZC + .2)), .03, blue);
+      pipe(V(XB + .14, tierY[tiers - 1] - .1, side * (ZC + .18)), V(XB + .14, floorTop + .1, side * (ZC + .18)), .035, white);
+      pipe(V(XB + .14, floorTop + .1, side * (ZC + .18)), V(LEN / 2 - .9, floorTop + .1, side * (ZC + .05)), .035, white);
+      pipe(V(XA - .12, floorTop + .06, side * (ZC + .2)), V(LEN / 2 - .9, floorTop + .06, side * (ZC + .25)), .03, blue);
+    }
+    // Netztöpfe als ein Netz, dazu Jungpflanzen in den freien Löchern
+    const potsIM = new THREE.InstancedMesh(potGeo, black, pots.length);
+    const m4 = new THREE.Matrix4();
+    pots.forEach((q, i) => { q.tier.updateMatrixWorld(true); m4.makeTranslation(q.p.x, q.p.y, q.p.z).premultiply(q.tier.matrixWorld); potsIM.setMatrixAt(i, m4); });
+    g.updateMatrixWorld(true);
+    const gInv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    for (let i = 0; i < pots.length; i++) { potsIM.getMatrixAt(i, m4); potsIM.setMatrixAt(i, m4.premultiply(gInv)); }
+    g.add(potsIM);
+
+    /* Anbauplätze: je Platz ein Deckelfeld über den drei Rinnen mit eigener Lampe */
+    ctx.anchors = [];
+    const perSide = Math.ceil(n / 2);
+    const perTier = Math.max(1, Math.ceil(perSide / tiers));
+    const used = [];
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? 1 : -1, k = Math.floor(i / 2);
+      const tierI = Math.floor(k / perTier), col = k % perTier;
+      const x = XC + (col - (perTier - 1) / 2) * 1.45 - .2;
+      const y = tierY[tierI] + (XC - x) * SLOPE + .045;
+      const t = new THREE.Group();
+      t.position.set(x, y, side * ZC);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(.66, .016, .52), new THREE.MeshStandardMaterial({ color: 0xe2e6e8, roughness: .5 }));
+      t.add(lid);
+      const clip = new THREE.Mesh(new THREE.BoxGeometry(.06, .03, .02), new THREE.MeshStandardMaterial({ color: [0x5fd98e, 0x4fd6ff, 0xffb547][i % 3], roughness: .4 }));
+      clip.position.set(-.29, .01, -side * .27); t.add(clip);
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(.6, .02, .1), ledMat());
+      lamp.position.y = ledUp - .03;
+      t.add(lamp);
+      const pl = new THREE.PointLight(0xff62d8, 1.1, 1.7, 2);
+      pl.position.y = ledUp - .12;
+      t.add(pl);
+      t.userData.lamp = lamp; t.userData.lampLight = pl;
+      t.userData.anchor = new THREE.Object3D();
+      t.userData.anchor.position.y = .01;
+      t.add(t.userData.anchor);
+      t.traverse(o => { if (o.isMesh) { o.userData.slotId = slots[i].id; o.userData.pickable = true; } });
+      g.add(t);
+      ctx.anchors.push({ slot: slots[i], obj: t.userData.anchor, tray: t });
+      used.push({ side, tierI, x0: x - .36, x1: x + .36 });
+    }
+    // Jungpflanzen in den Löchern außerhalb der Plätze
+    // Keimling: kurzer Stiel und zwei bis drei Keimblätter, schräg nach oben
+    const sproutGeo = mergeGeometries([0, 1, 2].map(i => {
+      const leaf = new THREE.SphereGeometry(1, 8, 4);
+      leaf.scale(.024, .004, .012);
+      leaf.translate(.022, 0, 0);
+      leaf.rotateZ(.45);
+      leaf.rotateY(i * TAU / 3);
+      leaf.translate(0, .045, 0);
+      return leaf.toNonIndexed();
+    }).concat([new THREE.CylinderGeometry(.003, .004, .045, 4).translate(0, .022, 0).toNonIndexed()]));
+    const sproutMat = new THREE.MeshStandardMaterial({ color: 0x7cc456, roughness: .55, side: THREE.DoubleSide });
+    const R = rng(23);
+    const free = pots.filter(q => {
+      const wp = q.tier.localToWorld(q.p.clone());
+      return !used.some(u => Math.sign(wp.z) === u.side && Math.abs(q.tier.position.y - tierY[u.tierI]) < .01 && wp.x > u.x0 && wp.x < u.x1) && R() < .55;
+    });
+    const sp = new THREE.InstancedMesh(sproutGeo, sproutMat, free.length);
+    free.forEach((q, i) => {
+      const wp = q.tier.localToWorld(q.p.clone()).applyMatrix4(gInv);
+      m4.compose(wp, new THREE.Quaternion().setFromEuler(new THREE.Euler((R() - .5) * .4, R() * 6, (R() - .5) * .4)), new THREE.Vector3().setScalar(.7 + R() * .8));
+      sp.setMatrixAt(i, m4);
+    });
+    g.add(sp);
+
+    /* Vorratstanks: Acryl mit Nährlösung, von unten beleuchtet, Blasen vom Sprudelstein */
+    const acryl = new THREE.MeshStandardMaterial({ color: 0xdfefff, roughness: .05, metalness: 0, transparent: true, opacity: .16, depthWrite: false, side: THREE.DoubleSide });
+    const sol = new THREE.MeshStandardMaterial({ color: 0x2a9be0, emissive: 0x0a5aa0, emissiveIntensity: .9, roughness: .1, transparent: true, opacity: .55, depthWrite: false });
+    const bubTex = bubbleTexture();
+    const bubbles = [];
+    for (const side of [-1, 1]) {
+      const x = LEN / 2 - .62, z = side * 1.12, base = floorTop;
+      const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.4, .42, .12, 24), black);
+      plinth.position.set(x, base + .06, z); g.add(plinth);
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(.36, .36, 1.1, 32, 1, true), acryl);
+      tank.position.set(x, base + .67, z); g.add(tank);
+      const liquid = new THREE.Mesh(new THREE.CylinderGeometry(.345, .345, .82, 32), sol);
+      liquid.position.set(x, base + .53, z); g.add(liquid);
+      for (const dy of [.14, 1.2]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(.36, .018, 8, 32), alu);
+        ring.rotation.x = Math.PI / 2; ring.position.set(x, base + dy, z); g.add(ring);
+      }
+      const lid = new THREE.Mesh(new THREE.CylinderGeometry(.37, .37, .05, 32), white);
+      lid.position.set(x, base + 1.24, z); g.add(lid);
+      const pump = new THREE.Mesh(new THREE.BoxGeometry(.22, .14, .16), black);
+      pump.position.set(x - .05, base + 1.33, z); g.add(pump);
+      pipe(V(x - .16, base + 1.33, z), V(x - .5, base + 1.33, z - side * .02), .025, blue);
+      const glow = new THREE.PointLight(0x40b8ff, .9, 2.2, 2);
+      glow.position.set(x, base + .3, z); g.add(glow);
+      for (let i = 0; i < 16; i++) {
+        const b = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubTex, color: 0xd8f2ff, transparent: true, opacity: .8, depthWrite: false }));
+        b.scale.setScalar(.025 + R() * .03);
+        g.add(b);
+        bubbles.push({ b, x, z, base, ph: R(), r: R() * .22, a: R() * TAU, v: .18 + R() * .14 });
+      }
+    }
+    tickers.push((t, dt) => {
+      for (const m of streams) m.offset.y = (m.offset.y - dt * 1.6) % 1;
+      for (const o of bubbles) {
+        const u = (t * o.v / .8 + o.ph) % 1;
+        o.b.position.set(o.x + Math.cos(o.a + u * 3) * o.r, o.base + .14 + u * .8, o.z + Math.sin(o.a + u * 3) * o.r);
+        o.b.material.opacity = .8 * Math.min(1, u * 8) * (1 - u ** 6);
+      }
+    });
+
+    /* Bedienfeld: Nährlösung */
+    const con = screen(.72, .42, .86);
+    con.position.set(-LEN / 2 + .6, -.3, -.95);
+    con.rotation.y = Math.PI / 2 - .55;
+    const draw = con.userData.draw;
+    con.userData.draw = t => draw(t, ['EC   1,8 mS/cm', 'pH   5,9', 'Lsg. 20,5 °C', 'Fluss 1,2 L/min']);
+    g.add(con);
+    ctx.screens = [con];
+
+    g.add(new THREE.HemisphereLight(0x8a6cb4, 0x1e1626, .55));
+    g.add(new THREE.AmbientLight(0x4a3a58, .28));
+    const fill = new THREE.PointLight(0xe070ff, .7, LEN, 2);
+    fill.position.set(0, .9, 0);
+    g.add(fill);
+    ctx.profile = { keepTint: true, envI: .18 };
+    ctx.camera = { pos: new THREE.Vector3(-LEN * .42, -.05, .02), look: new THREE.Vector3(LEN * .5, -.35, 0) };
     return g;
   },
 
