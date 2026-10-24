@@ -104,6 +104,7 @@ const PHOTO_BONUS = 3;
 const SCAN_H = 30;
 
 function matches(target, t) {
+  if (target.test) return target.test(t);
   const g = groundTrack(t);
   return regionAt(g.lat, g.lon) === target.region && solar(t).lit === target.lit;
 }
@@ -206,7 +207,7 @@ export function startExperiment(st, id, now = Date.now()) {
   const e = EXP_BY_ID[id];
   if (!e) return null;
   if (st.experiment) return null;
-  st.experiment = { id, startedAt: now, endsAt: now + e.hours * HOUR };
+  st.experiment = { id, startedAt: now, endsAt: now + e.hours * HOUR / S.researchSpeed(st, now) };
   return st.experiment;
 }
 
@@ -223,4 +224,37 @@ export function finishExperiment(st, t, log) {
   st.stats.experiments = (st.stats.experiments || 0) + 1;
   S.addXp(st, r.xp);
   log.push({ type: 'experiment', name: e.name, credits: r.credits });
+}
+
+/* ───────────────────────── Funkkontakt ───────────────────────── */
+
+/* Die Bodenstation in Noordwijk hört nur, wenn die Station über Europa steht. */
+const EUROPE = new Set(['Mitteleuropa', 'Britische Inseln', 'Iberische Halbinsel', 'Skandinavien', 'Mittelmeer', 'Nordsee', 'Osteuropa']);
+const RADIO = { test: t => { const g = groundTrack(t); return EUROPE.has(regionAt(g.lat, g.lon)); } };
+export const CONTACT_BONUS = 0.15;
+
+/** Offenes und nächstes Kontaktfenster; Fenster werden für 24 h vorausberechnet. */
+export function radioWindow(st, now = Date.now()) {
+  const r = st.radio ||= { windows: [], until: 0, last: 0 };
+  if (r.until < now + 6 * HOUR) { r.windows = scanWindows(RADIO, now, now + 24 * HOUR); r.until = now + 24 * HOUR; }
+  r.windows = r.windows.filter(w => w.end > now);
+  const open = r.windows.find(w => w.start <= now) || null;
+  const next = r.windows.find(w => w.start > now) || null;
+  const used = !!open && r.last >= open.start;
+  return { open, next, used };
+}
+
+/** Kurz durchfunken: offene Aufträge bekommen einmalig 15 % mehr Prämie. */
+export function radioContact(st, now = Date.now()) {
+  const w = radioWindow(st, now);
+  if (!w.open || w.used) return null;
+  st.radio.last = now;
+  let boosted = 0;
+  for (const c of openContracts(st, now)) {
+    if (c.boosted) continue;
+    c.bonus = Math.round(c.bonus * (1 + CONTACT_BONUS)); c.boosted = true; boosted++;
+  }
+  st.mood = Math.min(10, (st.mood || 0) + 0.3);
+  st.stats.contacts = (st.stats.contacts || 0) + 1;
+  return { boosted };
 }

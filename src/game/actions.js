@@ -34,7 +34,7 @@ export function plantSeed(st, slotId, plantId) {
   st.substrate--;
   Object.assign(s, {
     plant: plantId, planted: Date.now(), prog: 0, moist: 1, nut: 1,
-    health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0,
+    health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0, thinned: false,
   });
   st.water = Math.max(0, st.water - S.CONST.SLOT_WATER * S.waterBuffer(st));
   st.nutrients = Math.max(0, st.nutrients - p.n / 2);
@@ -126,9 +126,21 @@ export function harvest(st, slotId) {
     seedBack = 1; st.seeds[s.plant] = (st.seeds[s.plant] || 0) + 1;
   }
   const padBack = S.queuePadWash(st);
+  const drained = drainTray(st, s);
   Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0 });
   emit('harvest', { plant: p, value: v, levelUps: st.level - lvl0, seedBack });
-  return ok(`${p.name} geerntet`, { value: v, levelUps: st.level - lvl0, seedBack, padBack, plant: p, first, contract });
+  return ok(`${p.name} geerntet`, { value: v, levelUps: st.level - lvl0, seedBack, padBack, drained, plant: p, first, contract });
+}
+
+/** Restwasser des Tabletts läuft zurück in den Tank — durch die Aufbereitung. */
+function drainTray(st, s) {
+  const left = (s.moist || 0) * S.CONST.SLOT_WATER * S.waterBuffer(st);
+  if (left <= 0) return 0;
+  const back = left * S.recovery(st);
+  st.water = Math.min(S.waterCap(st), st.water + back);
+  st.stats.waterRecovered += back;
+  st.stats.waterUsed += left;
+  return back;
 }
 
 export function clearSlot(st, slotId) {
@@ -136,7 +148,8 @@ export function clearSlot(st, slotId) {
   if (!s?.plant) return no('Platz ist leer');
   const p = PLANT_BY_ID[s.plant];
   S.queuePadWash(st);
-  Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0 });
+  drainTray(st, s);
+  Object.assign(s, { plant: null, prog: 0, moist: 0, nut: 0, health: 1, pollen: 0, dead: false, sick: null, harvestAt: 0, thinned: false });
   return ok(`${p.name} entfernt und Platz gereinigt`);
 }
 
@@ -294,4 +307,96 @@ export function startExperiment(st, id) {
   if (!x) return no('Unbekanntes Experiment');
   emit('experiment', id);
   return ok('Experiment angesetzt');
+}
+
+/* ───────────────────────── Wartung & Bordalltag ───────────────────────── */
+
+export function replaceFilter(st) {
+  const f = st.filter ||= { health: 1, spares: 0 };
+  if (f.spares < 1) return no('Keine Ersatzpatrone an Bord');
+  if (f.health > 0.9) return no('Der Filter ist noch fast neu');
+  f.spares--; f.health = 1;
+  st.stats.filters = (st.stats.filters || 0) + 1;
+  S.addXp(st, 6);
+  return ok('Filter gewechselt — die Rückgewinnung läuft wieder voll');
+}
+
+export function calibrateHydro(st) {
+  if (!st.modules.hydro?.built) return no('Kein Hydroponik-Modul');
+  if ((st.hydroDrift || 0) < 0.08) return no('Die Lösung ist im Sollbereich');
+  // Nachdosieren kostet etwas Salz und Säure
+  const salt = Math.round(40 * st.hydroDrift);
+  if (st.nutrients < salt) return no('Zu wenig Nährsalz zum Nachdosieren');
+  st.nutrients -= salt;
+  st.hydroDrift = 0;
+  st.stats.calibrations = (st.stats.calibrations || 0) + 1;
+  S.addXp(st, 8);
+  return ok(`Nährlösung kalibriert (${salt} g Salz nachdosiert)`);
+}
+
+export const REPAIR_MS = 5 * 60 * 1000;
+export function repairPanel(st) {
+  const f = st.panelFault;
+  if (!f) return no('Alle Paneele intakt');
+  if (f.repairing) return no('Der Roboterarm ist schon unterwegs');
+  f.repairing = Date.now() + REPAIR_MS;
+  return ok('Roboterarm tauscht das Segment — fertig in 5 Minuten');
+}
+
+export const DOCK_WINDOW = 15 * 60 * 1000;
+/** Anflug begleiten: im letzten Viertelstündchen vor dem Andocken. */
+export function confirmDocking(st, orderId) {
+  const o = st.orders.find(x => x.id === orderId);
+  const now = Date.now();
+  if (!o || o.done) return no('Keine Kapsel im Anflug');
+  if (o.confirmed) return no('Schon bestätigt');
+  if (o.arrivesAt - now > DOCK_WINDOW) return no('Die Kapsel ist noch zu weit weg');
+  o.confirmed = true;
+  const credits = Math.round((o.cost || 0) * 0.08 + 20);
+  st.credits += credits; st.stats.earned += credits;
+  // Manchmal legt die Bodenkontrolle etwas bei
+  let gift = null;
+  if (Math.random() < 0.35) {
+    const pool = Object.values(PLANT_BY_ID).filter(p => p.level <= st.level && p.archetype !== 'fungus');
+    const p = pool[Math.floor(Math.random() * pool.length)];
+    st.seeds[p.id] = (st.seeds[p.id] || 0) + 2; gift = p;
+  }
+  S.addXp(st, 10);
+  return ok('Andocken bestätigt', { credits, gift });
+}
+
+/** Ausdünnen: in der Sämlingsphase die schwächsten Pflänzchen ziehen — +12 % Ertrag. */
+export function thinSlot(st, slotId) {
+  const s = slotById(st, slotId);
+  if (!s?.plant || s.dead) return no('Nichts zum Ausdünnen');
+  if (s.thinned) return no('Schon ausgedünnt');
+  if (!canThin(s)) return no('Nur in der Sämlingsphase sinnvoll');
+  s.thinned = true;
+  st.stats.thinned = (st.stats.thinned || 0) + 1;
+  S.addXp(st, 3);
+  return ok('Ausgedünnt — die übrigen Pflanzen haben mehr Platz');
+}
+export function canThin(s) {
+  const p = PLANT_BY_ID[s?.plant];
+  if (!p || s.dead || s.thinned) return false;
+  if (!['leafy', 'root'].includes(p.stages || p.archetype)) return false;
+  return s.prog >= 0.08 && s.prog < 0.4;
+}
+
+export const WORKOUT_COOLDOWN = 20 * HOUR;
+export function workout(st) {
+  const now = Date.now();
+  if (now - (st.flags.lastWorkout || 0) < WORKOUT_COOLDOWN) return no('Die Muskeln brauchen noch Pause');
+  st.flags.lastWorkout = now;
+  st.flags.fitUntil = now + 24 * HOUR;
+  st.mood = clamp((st.mood || 0) + 1, 0, 10);
+  st.stats.workouts = (st.stats.workouts || 0) + 1;
+  S.addXp(st, 12);
+  return ok('Training absolviert — 24 h lang 8 % schnellere Forschung');
+}
+
+export function radioContact(st) {
+  const r = RQ.radioContact(st);
+  if (!r) return no('Gerade kein Kontakt zur Bodenstation');
+  return ok('Funkkontakt mit Noordwijk', r);
 }

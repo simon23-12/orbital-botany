@@ -129,18 +129,23 @@ function step(st, t, dt, log) {
   /* — Energie — */
   const peak = S.solarPeak(st);
   const gen = peak * (dt >= PERIOD ? (1 - sun.fraction) : sun.sun);
-  let lampW = 0;
-  for (const m of S.growModules(st)) lampW += S.lampWatts(st, m.id);
+  const lampMods = S.lampOrder(st).map(id => ({ id, w: S.lampWatts(st, id) })).filter(x => x.w > 0);
+  const lampW = lampMods.reduce((a, x) => a + x.w, 0);
   const load = S.baseLoad(st) + lampW;
   const netWh = (gen - load) * hours;
   const cap = S.batteryCap(st) * 1000;
   const before = st.battery * 1000;
   let after = before + netWh;
-  let brownout = 1;
+  const dim = {};                              // Modul → Anteil Licht, der noch ankommt
   if (after < 0) {
-    // Akku leer → Lampen werden abgeregelt; Grundlast hat Vorrang
-    const avail = before + gen * hours - S.baseLoad(st) * hours;
-    brownout = lampW > 0 ? clamp01(avail / (lampW * hours)) : 1;
+    // Akku leer → Lampen werden abgeregelt, Grundlast hat Vorrang.
+    // Der Strom geht nach Priorität: das wichtigste Modul bekommt zuerst.
+    let avail = Math.max(0, before + gen * hours - S.baseLoad(st) * hours);
+    for (const x of lampMods) {
+      const need = x.w * hours;
+      dim[x.id] = need > 0 ? clamp01(avail / need) : 1;
+      avail = Math.max(0, avail - need);
+    }
     after = 0;
     if (!st.flags.brownout) { st.flags.brownout = true; log.push({ type: 'power' }); }
   } else if (st.flags.brownout && after > cap * 0.25) {
@@ -165,7 +170,7 @@ function step(st, t, dt, log) {
 
     const mod = MOD_BY_ID[s.mod];
     let dli = slotDLI(st, s, sunFrac);
-    if (!mod?.sunlit && !mod?.dark) dli *= brownout;
+    if (!mod?.sunlit && !mod?.dark) dli *= dim[s.mod] ?? 1;
 
     const fLight = qLight(dli, p.dli);
     const fWater = qWater(s.moist);
@@ -173,7 +178,7 @@ function step(st, t, dt, log) {
     const fTemp = qTemp(st.tempTarget, p.temp);
     const fPh = qPh(CONST.BASE_PH, p.ph);
     const minF = Math.min(fLight, fWater, fNut, fTemp, fPh);
-    const bonus = qCO2(st.co2Target, fLight) * grow
+    const bonus = qCO2(st.co2Target, fLight) * grow * (s.mod === 'hydro' ? S.hydroFactor(st) : 1)
       * (p.archetype === 'woody' && S.hasRes(st, 'grafting') ? 1.25 : 1)
       * (s.sick ? 0.45 : 1);
 
@@ -244,6 +249,20 @@ function step(st, t, dt, log) {
   }
   st.flags.pollenDue = anyPollen;
 
+  /* — Verschleiß: Filter setzt sich zu, Nährlösung driftet — */
+  if (st.filter) st.filter.health = clamp01((st.filter.health ?? 1) - dt / (S.FILTER_DAYS * DAY));
+  if (st.modules.hydro?.built && st.slots.some(s => s.mod === 'hydro' && s.plant)) st.hydroDrift = clamp01((st.hydroDrift || 0) + dt / (S.HYDRO_DRIFT_H * HOUR));
+
+  /* — Mikrometeoriten: selten fällt ein Paneelsegment aus (im Mittel alle vier Tage) — */
+  if (!st.panelFault && Math.random() < dt / (4 * DAY)) {
+    st.panelFault = { at: t, loss: 0.25, repairedAt: 0, repairing: 0 };
+    log.push({ type: 'fault' });
+  }
+  if (st.panelFault?.repairing && st.panelFault.repairing <= t) {
+    st.panelFault = null; st.stats.repairs = (st.stats.repairs || 0) + 1;
+    log.push({ type: 'repaired' });
+  }
+
   /* — CO₂ & Atmosphäre (langsame Annäherung an den Sollwert) — */
   st.co2 = lerp(st.co2 ?? st.co2Target, st.co2Target, clamp01(hours / 6));
 }
@@ -255,6 +274,7 @@ function processTimed(st, t, log) {
   for (const o of st.orders) {
     if (o.done || o.arrivesAt > t) continue;
     o.done = true;
+    if (o.confirmed) st.stats.dockings = (st.stats.dockings || 0) + 1;
     st.stats.deliveries++;
     for (const [id, qty] of Object.entries(o.items)) {
       if (id.startsWith('seed:')) {
@@ -267,6 +287,7 @@ function processTimed(st, t, log) {
           if (item.give.water) st.water = Math.min(S.waterCap(st), st.water + item.give.water * qty);
           if (item.give.nutrients) st.nutrients = Math.min(S.nutriCap(st), st.nutrients + item.give.nutrients * qty);
           if (item.give.substrate) st.substrate += item.give.substrate * qty;
+          if (item.give.filters) { st.filter ||= { health: 1, spares: 0 }; st.filter.spares += item.give.filters * qty; }
           if (item.give.beneficials) st.flags.beneficials = (st.flags.beneficials || 0) + item.give.beneficials * qty;
           if (item.give.co2cart) st.flags.co2cart = (st.flags.co2cart || 0) + qty;
         }
@@ -389,11 +410,30 @@ export function harvestValue(st, slot) {
   const p = PLANT_BY_ID[slot.plant];
   if (!p) return { credits: 0, xp: 0, massG: 0 };
   const q = 0.45 + 0.55 * slot.health;
-  const pollBonus = S.hasRes(st, 'pollinator2') && p.pollinate ? 1.1 : 1;
+  const pollBonus = (S.hasRes(st, 'pollinator2') && p.pollinate ? 1.1 : 1) * (slot.thinned ? 1.12 : 1);
   return {
     credits: Math.round(p.value * q * pollBonus * S.sellFactor(st)),
     xp: Math.round(p.xp * (0.7 + 0.3 * slot.health)),
     massG: Math.round(p.yieldG * q * pollBonus),
     quality: q,
   };
+}
+
+/** Wasserbilanz pro Tag bei den laufenden Kulturen, Liter. */
+export function waterBalance(st) {
+  let transp = 0;
+  for (const s of st.slots) {
+    if (!s.plant || s.dead || s.prog >= 1) continue;
+    const p = PLANT_BY_ID[s.plant];
+    if (p) transp += waterRate(p) * DAY * S.waterFactor(st) * (s.prog < 0.15 ? 0.4 : 0.9);
+  }
+  const rec = S.recovery(st);
+  const back = transp * rec;
+  // Pads: je Ernte eines, gemittelt über die Zykluslängen
+  let rinse = 0;
+  if (S.hasRes(st, 'padwash')) for (const s of st.slots) {
+    const p = s.plant && PLANT_BY_ID[s.plant];
+    if (p) rinse += S.PAD_RINSE_L * (1 - rec) * DAY / cycleMs(p);
+  }
+  return { transp, back, rinse, loss: transp - back + rinse };
 }

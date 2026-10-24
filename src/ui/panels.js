@@ -105,6 +105,8 @@ export function lounge(app, arg, UI) {
     const r = st.research.active;
     tasks.push(['info', 'beaker', `${RES_BY_ID[r.id]?.name}: noch ${dur(r.endsAt - now, { short: true })}`, () => UI.open('research')]);
   }
+  const rwT = RQ.radioWindow(st, now);
+  if (rwT.open && !rwT.used && RQ.openContracts(st, now).some(c => !c.boosted)) tasks.push(['ok', 'mail', `Funkfenster offen — Aufträge nachverhandeln (<span class="mono" data-until="${rwT.open.end}">${countdown(rwT.open.end - now)}</span>)`, () => { const r = A.radioContact(st); if (r.ok) { sfx.research(); UI.toast('ok', 'Funkkontakt', `${r.boosted} Auftr${r.boosted === 1 ? 'ag' : 'äge'} +15 %`); app.save(); UI.render(); } }]);
   if (stip.full) tasks.push(['ok', 'star', `Missionszulage voll: ${num(stip.credits)} Cr abholen`, () => { const r = A.collectStipend(st); if (r.ok) { sfx.research(); UI.toast('ok', 'Missionszulage', `+${num(r.credits)} Cr`); app.save(); UI.render(); UI.tickHud(); } }]);
   const pw = RQ.photoWindow(st, now);
   if (pw.req && !pw.req.done) {
@@ -116,8 +118,20 @@ export function lounge(app, arg, UI) {
     const x = st.experiment;
     tasks.push(['info', 'flask', `${EXP_BY_ID[x.id]?.name}: noch ${dur(x.endsAt - now, { short: true })}`, () => UI.open('research')]);
   } else if (st.modules.lab?.built) tasks.push(['info', 'flask', 'Labor frei — ein Experiment ansetzen', () => app.goRoom('lab')]);
+  const act = (fn, title) => () => { const r = fn(); if (r.ok) { sfx.research(); UI.toast('ok', title, r.msg); app.save(); UI.render(); UI.tickHud(); } else { sfx.error(); UI.toast('info', title, r.msg); } };
+  const fh = S.filterHealth(st);
+  if (fh < .35) tasks.push([fh < .15 ? 'bad' : 'warn', 'droplets', `Wasserfilter bei ${Math.round(fh * 100)} % — ${st.filter?.spares ? 'wechseln' : 'Patronen bestellen'}`, st.filter?.spares ? act(() => A.replaceFilter(st), 'Filter') : () => UI.open('shop')]);
+  if (st.modules.hydro?.built && S.hydroDrift(st) > .5) tasks.push(['warn', 'flask', `Nährlösung driftet: Hydroponik −${Math.round(15 * S.hydroDrift(st))} % Wachstum`, act(() => A.calibrateHydro(st), 'Nährlösung')]);
+  if (st.panelFault) tasks.push(['warn', 'sun', st.panelFault.repairing ? `Roboterarm tauscht Paneel: <span class="mono" data-until="${st.panelFault.repairing}">${countdown(st.panelFault.repairing - now)}</span>` : 'Paneelsegment ausgefallen — tauschen', st.panelFault.repairing ? null : act(() => A.repairPanel(st), 'Reparatur')]);
+  const thin = st.slots.filter(s => A.canThin(s));
+  if (thin.length) tasks.push(['info', 'scissors', `${thin.length} Tablett${thin.length > 1 ? 's' : ''} ausdünnen (+12 % Ertrag)`, act(() => { let n = 0; for (const s of thin) if (A.thinSlot(st, s.id).ok) n++; return { ok: n > 0, msg: `${n} Tablett${n > 1 ? 's' : ''} ausgedünnt` }; }, 'Ausgedünnt')]);
   const arriving = st.orders.filter(o => !o.done);
-  for (const o of arriving) tasks.push(['info', 'rocket', `Fracht dockt in ${dur(o.arrivesAt - now, { short: true })} an`, () => UI.open('shop')]);
+  for (const o of arriving) {
+    const left = o.arrivesAt - now;
+    if (left <= A.DOCK_WINDOW && !o.confirmed) tasks.push(['ok', 'rocket', `Kapsel im Endanflug — Andocken begleiten (<span class="mono" data-until="${o.arrivesAt}">${countdown(left)}</span>)`,
+      () => { const r = A.confirmDocking(st, o.id); if (r.ok) { sfx.dock(); UI.toast('ok', 'Andocken bestätigt', `+${num(r.credits)} Cr${r.gift ? ` · Beipack: 2× ${r.gift.name}` : ''}`); app.save(); UI.render(); UI.tickHud(); } }]);
+    else tasks.push(['info', 'rocket', `Fracht dockt in ${dur(left, { short: true })} an${o.confirmed ? ' · begleitet' : ''}`, () => UI.open('shop')]);
+  }
 
   body.push(secT('An Bord zu tun'));
   if (!tasks.length) body.push(el('div', { class: 'card', style: { textAlign: 'center', padding: '1.4rem' } },
@@ -132,6 +146,27 @@ export function lounge(app, arg, UI) {
       fn ? el('span', { html: icon('check'), style: { opacity: .4, display: 'flex' } }) : null,
     ));
   }
+
+  /* Bordalltag: Training und Funkkontakt */
+  body.push(secT('Bordalltag'));
+  const daily = el('div', { class: 'card' });
+  const wLeft = A.WORKOUT_COOLDOWN - (now - (st.flags.lastWorkout || 0));
+  daily.append(el('div', { class: 'kv', 'data-tip': '<b>Training</b>Ohne Belastung verlieren Knochen im Orbit gut ein Prozent Masse im Monat. Auf der ISS sind zwei Stunden Sport am Tag Dienstpflicht — Laufband, Ergometer und eine Kraftmaschine mit Vakuumzylindern.' },
+    el('span', { html: icon('bolt') + ' Ergometer' }),
+    el('b', { text: S.isFit(st, now) ? `fit · noch ${dur(st.flags.fitUntil - now, { short: true })}` : '—' })));
+  daily.append(el('button', { class: 'btn btn--sm', disabled: wLeft > 0, style: { marginBottom: '.7rem' },
+    html: icon('bolt') + (wLeft > 0 ? `wieder in ${dur(wLeft, { short: true })}` : 'Trainieren (+8 % Forschung, 24 h)'),
+    onclick: act(() => A.workout(st), 'Training') }));
+  const rw = RQ.radioWindow(st, now);
+  daily.append(el('div', { class: 'kv', 'data-tip': `<b>Funkkontakt</b>Die Bodenstation hört direkt nur, wenn Hedera über Europa fliegt. Wer im Fenster kurz durchfunkt, handelt für alle offenen Aufträge ${Math.round(RQ.CONTACT_BONUS * 100)} % mehr Prämie aus — einmal je Auftrag.` },
+    el('span', { html: icon('mail') + ' Funkfenster Noordwijk' }),
+    rw.open ? el('b', { style: { color: 'var(--leaf)' }, html: `offen · <span class="mono" data-until="${rw.open.end}">${countdown(rw.open.end - now)}</span>` })
+      : el('b', { html: rw.next ? `öffnet in <span class="mono" data-until="${rw.next.start}">${countdown(rw.next.start - now)}</span>` : '—' })));
+  const boostable = RQ.openContracts(st, now).filter(c => !c.boosted).length;
+  daily.append(el('button', { class: 'btn btn--sm' + (rw.open && !rw.used ? ' btn--primary' : ''), disabled: !rw.open || rw.used,
+    html: icon('mail') + (rw.used ? 'Schon durchgefunkt' : rw.open ? `Durchfunken${boostable ? ` (+15 % auf ${boostable} Auftr${boostable > 1 ? 'äge' : 'ag'})` : ''}` : 'Warten aufs Fenster'),
+    onclick: act(() => A.radioContact(st), 'Funkkontakt') }));
+  body.push(daily);
 
   /* Aufträge von der Erde */
   const cons = RQ.openContracts(st, now);
@@ -395,6 +430,20 @@ export function grow(app, modId, UI) {
   }
 
   /* Plätze */
+  /* Hydroponik: Nährlösung driftet und will nachjustiert werden */
+  if (modId === 'hydro') {
+    const rd = S.hydroReadings(st), d = S.hydroDrift(st);
+    const card = el('div', { class: 'card', style: d > .5 ? { borderColor: 'rgba(255,181,71,.5)' } : {} });
+    card.append(el('div', { class: 'card__t' }, el('h3', { text: 'Nährlösung' }),
+      el('span', { class: 'chip ' + (d < .25 ? 'chip--leaf' : d < .6 ? 'chip--amber' : 'chip--bad'), text: d < .25 ? 'im Soll' : `Wachstum −${Math.round(15 * d)} %` })));
+    card.append(kv('Leitfähigkeit (EC)', `${rd.ec.toFixed(2).replace('.', ',')} mS/cm`, '<b>EC</b>Die elektrische Leitfähigkeit zeigt, wie viel Salz gelöst ist. Die Pflanzen ziehen Nährstoffe heraus, die Lösung wird dünner. Soll: 1,6 bis 2,0.'));
+    card.append(kv('pH-Wert', rd.ph.toFixed(1).replace('.', ','), '<b>pH</b>Wurzeln geben beim Aufnehmen von Nitrat basische Ionen ab, der pH steigt. Über 6,5 fallen Eisen und Mangan aus — die Pflanze verhungert in voller Lösung.'));
+    card.append(bar(1 - d, d < .25 ? 'var(--leaf)' : 'var(--amber)'));
+    card.append(el('button', { class: 'btn btn--sm', style: { marginTop: '.5rem' }, disabled: d < .08, html: icon('flask') + 'Messen & nachdosieren',
+      onclick: () => { const r = A.calibrateHydro(st); if (r.ok) { sfx.water(); UI.toast('ok', 'Kalibriert', r.msg); app.save(); UI.render(); } else { sfx.error(); UI.toast('info', 'Nicht nötig', r.msg); } } }));
+    body.push(card);
+  }
+
   body.push(secT(`Anbauplätze · ${slots.filter(s => s.plant).length} / ${slots.length} belegt`));
   const grid = el('div', { class: 'slots' });
   for (const s of slots) grid.append(slotCard(app, s, UI));
@@ -580,6 +629,7 @@ function slotDetail(app, s, UI) {
   else {
     if (s.prog >= 1) html += `<button class="btn btn--primary" data-a="harvest">${icon('scissors')}Ernten</button>`;
     html += `<button class="btn" data-a="water">${icon('droplets')}Gießen</button>`;
+    if (A.canThin(s)) html += `<button class="btn btn--cyan" data-a="thin" data-tip="<b>Ausdünnen</b>Zu dicht gesäte Pflanzen konkurrieren um Licht und Wurzelraum. Wer die schwächsten früh zieht, erntet von den übrigen mehr — hier 12 %.">${icon('scissors')}Ausdünnen (+12 %)</button>`;
     if (needPollen) html += `<button class="btn btn--cyan" data-a="pollen">${icon('bee')}Bestäuben</button>`;
     if (s.sick) html += `<button class="btn" data-a="treat" ${st.flags.beneficials > 0 ? '' : 'disabled'}>${icon('bug')}Nützlinge einsetzen</button>`;
     html += `<button class="btn btn--ghost btn--sm" data-a="clear">${icon('trash')}Verwerfen</button>`;
@@ -597,6 +647,7 @@ function slotDetail(app, s, UI) {
           r = A.harvest(st, s.id);
           if (r.ok) { sfx.harvest(); UI.toast('ok', 'Geerntet', `${p.name} · +${num(r.value.credits)} Cr · +${num(r.value.xp)} EP${r.seedBack ? ' · 1 Samen zurückgewonnen' : ''}${r.padBack ? ' · Pad geht in die Spülung' : ''}`); UI.harvestExtras(r); if (r.levelUps) UI.levelUp(r.levelUps); }
         } else if (act === 'water') { r = A.waterSlot(st, s.id); if (r.ok) sfx.water(); }
+        else if (act === 'thin') { r = A.thinSlot(st, s.id); if (r.ok) { sfx.research(); UI.toast('ok', 'Ausgedünnt', r.msg); } }
         else if (act === 'pollen') { r = A.pollinate(st, s.id); if (r.ok) { sfx.research(); UI.toast('ok', 'Bestäubt', r.msg); } }
         else if (act === 'treat') { r = A.treat(st, s.id); if (r.ok) UI.toast('ok', 'Behandelt', r.msg); }
         else if (act === 'clear') { r = A.clearSlot(st, s.id); if (r.ok) sfx.whoosh(); }
@@ -950,19 +1001,70 @@ export function systems(app, arg, UI) {
   const pc = el('div', { class: 'card' });
   pc.append(kv('Solarerzeugung gerade', watt(pw.gen), `<b>Solarleistung</b>Spitzenleistung ${watt(pw.peak)}.<br>Im Erdschatten null.`));
   pc.append(kv('Über den Umlauf gemittelt', watt(pw.meanGen)));
-  pc.append(kv('Grundlast der Module', watt(pw.base)));
-  pc.append(kv('Lampen', watt(pw.lamps)));
-  pc.append(kv('Bilanz je Umlauf', watt(pw.meanNet), '<b>Bilanz</b>Ist sie negativ, entlädt sich der Akku über die Zeit und die Lampen werden abgeregelt.'));
+  const loads = MODULES.map(m => [m, S.moduleLoad(st, m)]).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]);
+  pc.append(kv('Grundlast der Module', watt(pw.base), '<b>Grundlast</b>' + loads.map(([m, w]) => `${m.short || m.name}: ${watt(w)}`).join('<br>') + '<br><br>Anbaumodule ziehen den Großteil nur für belegte Plätze, das Labor nur, wenn etwas läuft.'));
+  pc.append(kv('Lampen (Mittel über die Lichtzeit)', watt(pw.lamps)));
+  pc.append(kv('Bilanz je Umlauf', `<span style="color:var(--${pw.meanNet < 0 ? 'bad' : 'leaf'})">${pw.meanNet > 0 ? '+' : ''}${watt(pw.meanNet)}</span>`, '<b>Bilanz</b>Erzeugung im Mittel minus Verbrauch. Ist sie negativ, hilft kein größerer Akku — er ist nur später leer.'));
   pc.append(el('div', { class: 'kv' }, el('span', { text: 'Akkuladung' }),
     el('b', { text: `${(st.battery * 1000).toFixed(0)} / ${(S.batteryCap(st) * 1000).toFixed(0)} Wh` })));
   pc.append(bar(st.battery / S.batteryCap(st), pw.meanNet < 0 ? 'var(--bad)' : 'var(--leaf)'));
+  /* Prognose und Ursache */
+  if (pw.meanNet < 0) {
+    const hrs = st.battery * 1000 / -pw.meanNet;
+    const top = loads[0];
+    const lampShare = pw.lamps / pw.load;
+    const why = lampShare > .35 ? `Die Lampen ziehen ${Math.round(lampShare * 100)} % — kürzere Lichtzeit oder weniger µmol helfen sofort.`
+      : `Größter Verbraucher ist ${top[0].name} mit ${watt(top[1])}. Leere Anbauplätze und ein ruhendes Labor sparen Grundlast.`;
+    pc.append(hint(`<b>Akku leer in etwa ${dur(hrs * HOUR, { short: true })}.</b> Danach werden die Lampen nach Priorität abgeregelt. ${why} Mehr Solarleistung gibt es über die Forschung im Zweig Station.`, 'amber'));
+  } else {
+    pc.append(el('p', { class: 'card__d', style: { margin: '.4rem 0 0', color: 'var(--leaf)' }, text: `Überschuss von ${watt(pw.meanNet)} — der Akku lädt sich über den Umlauf auf.` }));
+  }
+  /* Paneelschaden */
+  if (st.panelFault) {
+    const f = st.panelFault;
+    pc.append(el('div', { class: 'hint hint--amber', style: { marginTop: '.6rem' }, html: icon('alert') + `<div><b>Paneelsegment ausgefallen</b> — ein Mikrometeorit hat ein Segment durchschlagen, ${Math.round(f.loss * 100)} % weniger Solarleistung.${f.repairing ? `<br>Roboterarm arbeitet, fertig in <span class="mono" data-until="${f.repairing}">${countdown(f.repairing - now)}</span>.` : ''}</div>` }));
+    if (!f.repairing) pc.append(el('button', { class: 'btn btn--sm btn--primary', style: { marginTop: '.4rem' }, html: icon('settings') + 'Segment tauschen (5 min)',
+      onclick: () => { const r = A.repairPanel(st); if (r.ok) { sfx.research(); UI.toast('ok', 'Reparatur', r.msg); app.save(); UI.render(); } } }));
+  }
   pc.append(el('p', { class: 'card__d', style: { marginTop: '.6rem' }, html: `Die Station durchläuft je Umlauf bis zu <b>${(sol.eclipseMs / 60000).toFixed(0)} Minuten Erdschatten</b>. In dieser Zeit speist nur der Akku. ${Math.abs(beta(now)) > BETA_CRIT ? '<b style="color:var(--amber)">Derzeit Beta-Hochphase: kein Schatten.</b>' : ''}` }));
   body.push(pc);
+
+  /* Lastabwurf: wer bekommt zuerst Strom, wenn der Akku leer ist? */
+  const order = S.lampOrder(st);
+  if (order.length > 1) {
+    body.push(secT('Lastabwurf · Priorität bei Strommangel'));
+    const lc = el('div', { class: 'card' });
+    lc.append(el('p', { class: 'card__d', style: { marginTop: 0 }, text: 'Ist der Akku leer, bekommt das oberste Modul zuerst Licht, das unterste wird zuerst gedimmt.' }));
+    order.forEach((id, i) => {
+      const move = d => { const o = [...order]; [o[i], o[i + d]] = [o[i + d], o[i]]; st.lampPriority = o; app.save(); UI.render(); };
+      lc.append(el('div', { class: 'kv' },
+        el('span', { text: `${i + 1}. ${MOD_BY_ID[id]?.name}` }),
+        el('span', { style: { display: 'flex', gap: '.3rem' } },
+          el('button', { class: 'btn btn--sm btn--ghost', disabled: i === 0, html: '▲', onclick: () => move(-1) }),
+          el('button', { class: 'btn btn--sm btn--ghost', disabled: i === order.length - 1, html: '▼', onclick: () => move(1) }))));
+    });
+    body.push(lc);
+  }
 
   body.push(secT('Wasserkreislauf'));
   const wc = el('div', { class: 'card' });
   wc.append(kv('Tankinhalt', `${vol(st.water)} / ${num(S.waterCap(st))} L`));
   wc.append(bar(st.water / S.waterCap(st), 'var(--cyan)'));
+  /* Tagesbilanz aus den laufenden Kulturen */
+  const wb = SIM.waterBalance(st);
+  wc.append(kv('Verdunstung der Kulturen', `${num(wb.transp, 1)} L/Tag`, '<b>Transpiration</b>Fast alles Wasser, das eine Pflanze aufnimmt, verdunstet über die Blätter. Der Kondensator holt den Großteil aus der Kabinenluft zurück.'));
+  wc.append(kv('Zurückgewonnen', `${num(wb.back, 1)} L/Tag`));
+  if (wb.rinse) wc.append(kv('Spülverlust Pads', `${num(wb.rinse, 1)} L/Tag`));
+  wc.append(kv('Verlust', `<span style="color:var(--${wb.loss > 0.5 ? 'amber' : 'leaf'})">${num(wb.loss, 1)} L/Tag</span>`));
+  wc.append(kv('Tank reicht für', wb.loss > 0.05 ? dur(st.water / wb.loss * DAY, { short: true }) : 'unbegrenzt'));
+  /* Filter */
+  const fh = S.filterHealth(st);
+  wc.append(el('div', { class: 'kv', style: { marginTop: '.6rem' }, 'data-tip': `<b>Wasserfilter</b>Aktivkohle und Ionentauscher halten Seifenreste, Ammoniak und Metallionen zurück. Eine Patrone hält rund ${S.FILTER_DAYS} Tage; je voller sie ist, desto weniger Wasser kommt zurück — bis zu ${S.FILTER_MAX_LOSS * 100} Prozentpunkte.` },
+    el('span', { text: 'Filterpatrone' }), el('b', { text: `${Math.round(fh * 100)} % · ${st.filter?.spares || 0} Ersatz` })));
+  wc.append(bar(fh, fh < .3 ? 'var(--bad)' : fh < .6 ? 'var(--amber)' : 'var(--cyan)'));
+  wc.append(el('button', { class: 'btn btn--sm', style: { marginTop: '.4rem' }, disabled: fh > .9 || !(st.filter?.spares > 0),
+    html: icon('refresh') + (st.filter?.spares > 0 ? 'Filter wechseln' : 'Keine Ersatzpatrone — im Katalog bestellen'),
+    onclick: () => { const r = A.replaceFilter(st); if (r.ok) { sfx.water(); UI.toast('ok', 'Filter gewechselt', r.msg); app.save(); UI.render(); } else { sfx.error(); UI.toast('info', 'Nicht nötig', r.msg); } } }));
   wc.append(kv('Rückgewinnungsrate', `${(S.recovery(st) * 100).toFixed(0)} %`,
     '<b>Wasserrückgewinnung</b>Der Kondensator holt transpiriertes Wasser aus der Kabinenluft zurück. Die ISS erreicht rund 93 %.'));
   wc.append(kv('Bisher verbraucht', `${num(st.stats.waterUsed, 0)} L`));

@@ -18,7 +18,7 @@ import * as S from './game/state.js';
 import * as SIM from './game/sim.js';
 import * as A from './game/actions.js';
 import { checkMail, unread } from './game/mail.js';
-import { photoWindow, stipendDue } from './game/requests.js';
+import { photoWindow, stipendDue, radioWindow, openContracts } from './game/requests.js';
 import { load, save as saveGame, newGame } from './core/save.js';
 import { solar, beta, BETA_CRIT, PERIOD, phase as orbitPhase } from './core/orbit.js';
 import { UI } from './ui/ui.js';
@@ -188,6 +188,8 @@ const app = {
     if (counts.module) rows.push(['rocket', `Modul montiert: <b>${res.log.filter(e => e.type === 'module').map(e => e.name).join(', ')}</b>`]);
     if (counts.sick) rows.push(['bug', `<b>${counts.sick}</b> Befall festgestellt`]);
     if (counts.death) rows.push(['alert', `<b>${counts.death}</b> Kultur eingegangen`]);
+    if (st.panelFault) rows.push(['sun', 'Ein Mikrometeorit hat ein Paneelsegment getroffen — im Technikraum tauschen']);
+    if (S.filterHealth(st) < .35) rows.push(['droplets', `Wasserfilter bei ${Math.round(S.filterHealth(st) * 100)} %`]);
     if (counts.power) rows.push(['bolt', 'Energiebilanz war zeitweise negativ — Lampen wurden abgeregelt']);
     if (newMail.length) rows.push(['mail', `<b>${newMail.length}</b> neue Nachricht${newMail.length > 1 ? 'en' : ''}`]);
     if (st.level > before.level) rows.push(['star', `Stufe <b>${st.level}</b> erreicht`]);
@@ -446,6 +448,18 @@ const app = {
         if (UI.panel && ['lounge', 'cupola'].includes(UI.panel.id)) UI.render({ auto: true });
       } else if (!pw.open && this._wishSeen && UI.panel?.id === 'cupola') { this._wishSeen = 0; UI.render({ auto: true }); }
     }
+    /* Endanflug und Funkfenster: kurz Bescheid geben, wenn etwas zu tun ist */
+    this.opsTimer = (this.opsTimer || 0) + dt;
+    if (this.opsTimer > 3) {
+      this.opsTimer = 0;
+      const o = st.orders.find(x => !x.done && !x.confirmed && x.arrivesAt - nowMs <= 15 * MIN && x.arrivesAt > nowMs);
+      if (o && this._dockSeen !== o.id) { this._dockSeen = o.id; sfx.mail(); UI.toast('info', 'Kapsel im Endanflug', 'In der Lounge das Andocken begleiten — die Bodenkontrolle legt etwas drauf.', 9000); if (UI.panel?.id === 'lounge') UI.render({ auto: true }); }
+      const rw = radioWindow(st, nowMs);
+      if (rw.open && !rw.used && this._radioSeen !== rw.open.start && openContracts(st, nowMs).some(c => !c.boosted)) {
+        this._radioSeen = rw.open.start; UI.toast('info', 'Funkfenster offen', `Über Europa — noch ${dur(rw.open.end - nowMs, { short: true })}. Aufträge in der Lounge nachverhandeln.`, 9000);
+        if (UI.panel?.id === 'lounge') UI.render({ auto: true });
+      }
+    }
     this.mailTimer += dt;
     if (this.mailTimer > 25) {
       this.mailTimer = 0;
@@ -464,6 +478,8 @@ const app = {
       else if (e.type === 'delivery') { sfx.dock(); UI.toast('ok', 'Fracht angedockt', 'Die Lieferung ist an Bord.'); this.rebuildStation(); }
       else if (e.type === 'research') { sfx.research(); UI.toast('xp', 'Forschung abgeschlossen', e.name); this.rebuildStation(); }
       else if (e.type === 'module') { sfx.dock(); UI.toast('xp', 'Modul montiert', e.name); this.rebuildStation(); UI.buildRooms(); }
+      else if (e.type === 'fault') { sfx.error(); UI.toast('warn', 'Mikrometeorit', 'Ein Paneelsegment ist ausgefallen — 25 % weniger Solarleistung. Im Technikraum tauschen.', 9000); this.rebuildStation(); }
+      else if (e.type === 'repaired') { sfx.research(); UI.toast('ok', 'Paneel getauscht', 'Die Solarflügel liefern wieder volle Leistung.'); this.rebuildStation(); }
       else if (e.type === 'experiment') { sfx.research(); UI.toast('ok', 'Experiment abgeschlossen', `${e.name} · +${num(e.credits)} Cr`); }
       else if (e.type === 'sick') UI.toast('warn', 'Befall', `${e.name}: ${e.what}`);
       else if (e.type === 'power') UI.toast('warn', 'Energie knapp', 'Der Akku ist leer — die Lampen werden abgeregelt.');

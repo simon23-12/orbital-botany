@@ -340,6 +340,12 @@ export function buildStation(st) {
   cross.rotation.x = Math.PI / 2;
   wings.add(cross);
   wings.position.x = -2.8;
+  /* Mikrometeoritentreffer: ein Flügel steht verdreht und dunkel */
+  if (st.panelFault) {
+    const w = wings.children[0];
+    w.rotation.z += .32;
+    w.traverse(o => { if (o.isMesh && o.material) { o.material = o.material.clone(); o.material.color?.multiplyScalar(.35); if (o.material.emissive) o.material.emissive.setRGB(.25, .04, 0); } });
+  }
   root.add(wings);
 
   /* Radiatoren */

@@ -41,6 +41,10 @@ export function freshState(name = 'Kommandant') {
     nutrients: 800,
     substrate: 12,
     padWash: { queue: 0, nextAt: 0 },   // Pads in der Spülung
+    filter: { health: 1, spares: 1 },   // Wasserfilter und Ersatzpatronen
+    hydroDrift: 0,                      // Abweichung der Nährlösung
+    panelFault: null,                   // ausgefallenes Paneelsegment
+    lampPriority: [],                   // Reihenfolge beim Lastabwurf, wichtigstes zuerst
     stipend: { since: now },            // Missionszulage sammelt sich ab hier
     contracts: [],                      // Aufträge von der Erde
     photoReq: null,                     // aktueller Fotowunsch
@@ -64,6 +68,7 @@ export function freshState(name = 'Kommandant') {
       planted: 0, harvested: 0, deaths: 0, massG: 0, earned: 0, spent: 0,
       waterUsed: 0, waterRecovered: 0, deliveries: 0, pollinated: 0, researchDone: 0, photos: 0,
       experiments: 0, contracts: 0, photoRequests: 0, firstFinds: 0,
+      filters: 0, calibrations: 0, repairs: 0, dockings: 0, thinned: 0, workouts: 0, contacts: 0,
     },
     flags: {},
     settings: { music: true, musicVol: 0.55, sfx: true, sfxVol: 0.6, quality: 'auto', bloom: true, reduceMotion: false },
@@ -100,6 +105,8 @@ export const hasRes = (st, id) => st.research.done.includes(id);
 
 export function solarPeak(st) {
   let p = CONST.SOLAR_PEAK;
+  if (hasRes(st, 'solarclean')) p *= 1.2;
+  if (st.panelFault && !st.panelFault.repairedAt) p *= 1 - st.panelFault.loss;
   if (hasRes(st, 'solar2')) p *= 1.65;
   if (hasRes(st, 'solar3')) p *= 2.2;
   return p;
@@ -114,9 +121,26 @@ export function lightBonus(st) {
   return hasRes(st, 'led3') ? 1.12 : 1;
 }
 export function recovery(st) {
-  if (hasRes(st, 'recycle3')) return 0.96;
-  if (hasRes(st, 'recycle2')) return 0.88;
-  return CONST.RECOVERY;
+  let r = CONST.RECOVERY;
+  if (hasRes(st, 'recycle3')) r = 0.96;
+  else if (hasRes(st, 'urine')) r = 0.92;
+  else if (hasRes(st, 'recycle2')) r = 0.88;
+  // Ein zugesetzter Filter kostet bis zu zehn Prozentpunkte
+  return r - FILTER_MAX_LOSS * (1 - filterHealth(st));
+}
+
+/* ── Wartung ── */
+export const FILTER_DAYS = 6;              // so lange hält eine Patrone
+export const FILTER_MAX_LOSS = 0.10;
+export const filterHealth = st => clamp01(st.filter?.health ?? 1);
+/** Drift der Nährlösung in der Hydroponik, 0 = frisch kalibriert, 1 = stark verschoben. */
+export const HYDRO_DRIFT_H = 36;
+export const hydroDrift = st => clamp01(st.hydroDrift ?? 0);
+export const hydroFactor = st => 1 - 0.15 * hydroDrift(st);
+/** Angezeigte Messwerte aus der Drift: EC sinkt, pH steigt. */
+export function hydroReadings(st) {
+  const d = hydroDrift(st);
+  return { ec: 1.8 - 0.7 * d, ph: 5.9 + 1.1 * d };
 }
 export function waterCap(st) {
   let c = CONST.WATER_CAP;
@@ -151,9 +175,11 @@ export function sellFactor(st) {
 export function deliveryMs(st) {
   return (hasRes(st, 'express') ? 5 : CONST.DELIVERY_H) * HOUR;
 }
-export function researchSpeed(st) {
-  return st.comfort.includes('coffeemaker') ? 1.12 : 1;
+export function researchSpeed(st, now = Date.now()) {
+  return (st.comfort.includes('coffeemaker') ? 1.12 : 1) * (isFit(st, now) ? 1.08 : 1);
 }
+/** Training am Ergometer hält einen Tag lang wach und konzentriert. */
+export const isFit = (st, now = Date.now()) => (st.flags.fitUntil || 0) > now;
 export function autoPollinate(st, p) {
   if (hasRes(st, 'pollinator2')) return true;
   if (hasRes(st, 'pollinator')) return ['microtom', 'weizen', 'paprika', 'chili', 'bohne'].includes(p.id);
@@ -178,10 +204,21 @@ export function queuePadWash(st, now = Date.now()) {
 
 export const waterBuffer = st => hasRes(st, 'autowater') ? 1.6 : 1;
 
-/** Grundlast aller gebauten Module in Watt. */
+/** Grundlast aller gebauten Module in Watt. Anbaumodule ziehen den Großteil nur
+ *  für belegte Plätze (Pumpen, Lüfter, Sensoren), das Labor nur, wenn etwas läuft. */
+export function moduleLoad(st, m) {
+  if (!st.modules[m.id]?.built) return 0;
+  const slots = moduleSlots(st, m.id);
+  if (slots > 0) {
+    const used = st.slots.filter(s => s.mod === m.id && s.plant).length;
+    return m.power * (0.25 + 0.75 * used / slots);
+  }
+  if (m.id === 'lab') return m.power * (st.research.active || st.experiment ? 1 : 0.35);
+  return m.power;
+}
 export function baseLoad(st) {
   let w = 0;
-  for (const m of MODULES) if (st.modules[m.id]?.built) w += m.power;
+  for (const m of MODULES) w += moduleLoad(st, m);
   return w;
 }
 /** Anbauplätze eines Moduls. */
@@ -205,6 +242,13 @@ export function lampOf(st, moduleId) {
   return st.lamps[moduleId];
 }
 
+/** Module mit Lampen in der Reihenfolge, in der sie beim Strommangel versorgt werden. */
+export function lampOrder(st) {
+  const ids = growModules(st).filter(m => !m.sunlit && !m.dark).map(m => m.id);
+  const pri = (st.lampPriority || []).filter(id => ids.includes(id));
+  return [...pri, ...ids.filter(id => !pri.includes(id))];
+}
+
 /** Lampenleistung eines Moduls in Watt, wenn eingeschaltet. */
 export function lampWatts(st, moduleId) {
   const mod = MOD_BY_ID[moduleId];
@@ -213,7 +257,8 @@ export function lampWatts(st, moduleId) {
   if (!lamp.on) return 0;
   const used = slotsOf(st, moduleId).filter(s => s.plant).length;
   if (!used) return 0;
-  return lamp.ppfd * CONST.TRAY_AREA * used / ledEfficacy(st);
+  // Mittel über den Tag: Die Lampen brennen nur während der Lichtzeit
+  return lamp.ppfd * CONST.TRAY_AREA * used / ledEfficacy(st) * clamp(lamp.hours ?? 16, 0, 24) / 24;
 }
 
 /* ── Migration ───────────────────────────────────────────────────────── */
